@@ -10,13 +10,11 @@ pipeline {
   }
 
   environment {
-    FRONTEND_DIR = "Mediconnet/Frontend/Web"
-    BACKEND_DIR  = "Mediconnet/Backend"
-
+    FRONTEND_DIR = "MediConnect/Frontend/Web"   // <-- fix spelling/case
+    BACKEND_DIR  = "MediConnect/Backend"       // <-- fix if this actually exists
     NGINX_WEBROOT = "/var/www/MEDICONNET_FRONTEND"
     PM2_APP_NAME  = "MEDICONNET_API"
     NODE_ENV = "production"
-
     TERM = "xterm-256color"
     FORCE_COLOR = "1"
   }
@@ -26,7 +24,13 @@ pipeline {
     stage('Checkout') {
       steps {
         checkout scm
-        sh 'git rev-parse --short HEAD'
+        sh '''
+          git rev-parse --short HEAD
+          echo "Workspace tree (depth 3):"
+          find . -maxdepth 3 -type f -name package.json -print
+          echo "Listing expected frontend dir:"
+          ls -la "${FRONTEND_DIR}" || true
+        '''
       }
     }
 
