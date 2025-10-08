@@ -9,7 +9,7 @@ pipeline {
 
   environment {
     // Leave these empty; we’ll auto-detect FRONTEND_DIR
-    FRONTEND_DIR = ""
+    FRONTEND_DIR_CANDIDATE="./MediConnect/Frontend/web"
     BACKEND_DIR  = ""                       // set later if you add a backend
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
     PM2_APP_NAME  = "MEDICONNECT_API"
