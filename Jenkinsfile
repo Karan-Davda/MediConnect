@@ -1,4 +1,4 @@
-// Jenkinsfile for Mediconnet (Multibranch-ready) — no ansiColor
+// Jenkinsfile for Mediconnet (Multibranch-ready) — uses NVM to provide Node/npm on agent
 
 pipeline {
   agent any
@@ -19,16 +19,18 @@ pipeline {
     PM2_APP_NAME  = "MEDICONNET_API"                 // <-- SET THIS
     NODE_ENV = "production"
 
-    // Keep colors from Node tools even without plugin
+    // Keep some tools colorful even without ansiColor plugin
     TERM = "xterm-256color"
     FORCE_COLOR = "1"
   }
 
-  triggers {
-    // GitHub webhook will trigger builds; this is a fallback
-    pollSCM('@daily')
-  }
-
+  // Reusable NVM bootstrap (install if missing, then use Node 18)
+  // We embed this into each sh """ ... """ so node/npm exist in that shell.
+  // NOTE: Groovy will expand ${NVM_SETUP} into the shell script content.
+  // Do NOT put bash ${var:?} constructs inside, or escape with \${...}.
+  // (We avoided those elsewhere already.)
+  // Using 18 LTS for stability; change if you need 20.x.
+  // Also prints versions for quick debugging.
   stages {
 
     stage('Checkout') {
@@ -40,50 +42,93 @@ pipeline {
 
     stage('Install deps') {
       steps {
-        dir("${env.FRONTEND_DIR}") { sh 'npm ci' }
-        dir("${env.BACKEND_DIR}")  { sh 'npm ci' }
+        script {
+          def NVM_SETUP = '''
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
+            nvm install 18 >/dev/null
+            nvm use 18 >/dev/null
+            node -v
+            npm -v
+          '''
+          sh """
+            ${NVM_SETUP}
+            cd "${FRONTEND_DIR}"
+            npm ci
+          """
+          sh """
+            ${NVM_SETUP}
+            cd "${BACKEND_DIR}"
+            npm ci
+          """
+        }
       }
     }
 
     stage('Lint & Test') {
       steps {
-        // Make sure these scripts exist; '|| true' keeps pipeline going if optional
-        dir("${env.FRONTEND_DIR}") { sh 'npm run -s lint || true' }
-        dir("${env.BACKEND_DIR}")  { sh 'npm test || echo "no tests"' }
+        script {
+          def NVM_SETUP = '''
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
+            nvm install 18 >/dev/null
+            nvm use 18 >/dev/null
+          '''
+          sh """
+            ${NVM_SETUP}
+            cd "${FRONTEND_DIR}"
+            npm run -s lint || true
+          """
+          sh """
+            ${NVM_SETUP}
+            cd "${BACKEND_DIR}"
+            npm test || echo "no tests"
+          """
+        }
       }
     }
 
     stage('Build (frontend)') {
       steps {
-        dir("${env.FRONTEND_DIR}") {
-          sh '''
+        script {
+          def NVM_SETUP = '''
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
+            nvm install 18 >/dev/null
+            nvm use 18 >/dev/null
+          '''
+          sh """
+            ${NVM_SETUP}
+            cd "${FRONTEND_DIR}"
             npm run build
             if [ ! -d dist ] && [ ! -d build ]; then
               echo "No dist/ or build/ folder created. Ensure your build script outputs one of these."
               exit 1
             fi
-          '''
+          """
         }
       }
     }
 
     stage('Package (backend)') {
       steps {
-        dir("${env.BACKEND_DIR}") {
-          sh '''
-            set -euo pipefail
-            rm -rf .release && mkdir -p .release
-            cp -r package.json package-lock.json .release/ 2>/dev/null || true
-            # If you transpile TS -> dist, include it; else include src
-            if [ -d dist ]; then
-              cp -r dist .release/
-            elif [ -d src ]; then
-              cp -r src .release/
-            else
-              echo "Backend has neither dist/ nor src/. Add your build or adjust copy."
-            fi
-          '''
-        }
+        sh '''
+          set -euo pipefail
+          cd "${BACKEND_DIR}"
+          rm -rf .release && mkdir -p .release
+          cp -r package.json package-lock.json .release/ 2>/dev/null || true
+          # If you transpile TS -> dist, include it; else include src
+          if [ -d dist ]; then
+            cp -r dist .release/
+          elif [ -d src ]; then
+            cp -r src .release/
+          else
+            echo "Backend has neither dist/ nor src/. Add your build or adjust copy."
+          fi
+        '''
       }
     }
 
@@ -92,7 +137,7 @@ pipeline {
       steps {
         echo "Deploying Mediconnet to this EC2"
 
-        // Frontend → Nginx
+        // --- Frontend → Nginx ---
         sh """
           set -euo pipefail
 
@@ -128,28 +173,32 @@ pipeline {
           sudo nginx -t && sudo systemctl reload nginx || true
         """
 
-        // Backend → PM2 restart
-        sh """
-          set -euo pipefail
+        // --- Backend → PM2 restart (ensure Node via NVM and pm2 available) ---
+        script {
+          def NVM_SETUP = '''
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
+            nvm install 18 >/dev/null
+            nvm use 18 >/dev/null
+          '''
+          sh """
+            ${NVM_SETUP}
+            cd "${BACKEND_DIR}"
+            npm ci --omit=dev
 
-          : "\${BACKEND_DIR}"
-          : "\${PM2_APP_NAME}"
+            if ! command -v pm2 >/dev/null 2>&1; then
+              npm i -g pm2
+            fi
 
-          cd "${BACKEND_DIR}"
-          npm ci --omit=dev
-
-          # Ensure pm2 is available (adapt if pm2 is installed via nvm)
-          if ! command -v pm2 >/dev/null 2>&1; then
-            echo "pm2 not found in PATH for Jenkins user"; exit 1
-          fi
-
-          if pm2 list | grep -q "${PM2_APP_NAME}"; then
-            pm2 restart "${PM2_APP_NAME}"
-          else
-            pm2 start "npm run start" --name "${PM2_APP_NAME}"
-          fi
-          pm2 save
-        """
+            if pm2 list | grep -q "${PM2_APP_NAME}"; then
+              pm2 restart "${PM2_APP_NAME}"
+            else
+              pm2 start "npm run start" --name "${PM2_APP_NAME}"
+            fi
+            pm2 save
+          """
+        }
       }
     }
   } // stages
@@ -161,4 +210,4 @@ pipeline {
       archiveArtifacts allowEmptyArchive: true, artifacts: "${FRONTEND_DIR}/dist/**,${FRONTEND_DIR}/build/**"
     }
   }
-} // pipeline
+}
