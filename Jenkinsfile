@@ -26,7 +26,7 @@ pipeline {
         deleteDir()
         checkout scm
         sh '''
-          set -euo pipefail
+          set -e
           echo "Commit: $(git rev-parse --short HEAD)"
           echo "package.json (depth<=4):"
           find . -maxdepth 4 -type f -name package.json -print | sort
@@ -58,7 +58,6 @@ pipeline {
               if [ ! -f package.json ]; then
                 echo "❌ package.json not found in $(pwd)"; exit 1
               fi
-              # Prefer reproducible CI, fall back if no lockfile
               (''' + NVM_SETUP + '''
               npm ci --ignore-scripts) || (''' + NVM_SETUP + '''
               npm install --no-audit --prefer-offline --ignore-scripts)
@@ -143,7 +142,7 @@ pipeline {
           if (env.BACKEND_DIR?.trim()) {
             dir("${BACKEND_DIR}") {
               sh '''
-                set -euo pipefail
+                set -e
                 if [ -f package.json ]; then
                   rm -rf .release && mkdir -p .release
                   cp -r package.json package-lock.json .release/ 2>/dev/null || true
@@ -174,7 +173,7 @@ pipeline {
         // --- Frontend → Nginx ---
         dir("${FRONTEND_DIR}") {
           sh '''
-            set -euo pipefail
+            set -e
 
             : "${NGINX_WEBROOT}"
 
