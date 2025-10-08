@@ -97,57 +97,73 @@ pipeline {
     }
 
     stage('Deploy') {
-      when { branch 'main' }
-      steps {
-        ansiColor('xterm') {
-          echo "Deploying Mediconnet to this EC2"
+  when { branch 'main' }
+  steps {
+    ansiColor('xterm') {
+      echo "Deploying Mediconnet to this EC2"
 
-          // Frontend → Nginx
-          sh """
-  set -euo pipefail
-  sudo mkdir -p "${NGINX_WEBROOT}"
-  if [ -d "${FRONTEND_DIR}/dist" ]; then
-    SRC="${FRONTEND_DIR}/dist"
-  elif [ -d "${FRONTEND_DIR}/build" ]; then
-    SRC="${FRONTEND_DIR}/build"
-  else
-    echo "No frontend build folder found."
-    exit 1
-  fi
+      // Frontend → Nginx
+      sh """
+        set -euo pipefail
 
-  # Explicit guard
-  if [ -z "${NGINX_WEBROOT}" ]; then
-    echo "NGINX_WEBROOT is empty or unset"; exit 1
-  fi
-  # Safer deletion: require non-root path and existing dir
-  if [ "${NGINX_WEBROOT}" = "/" ] || [ "${NGINX_WEBROOT}" = "" ]; then
-    echo "Refusing to wipe ${NGINX_WEBROOT}"; exit 1
-  fi
-  if [ -d "${NGINX_WEBROOT}" ]; then
-    sudo rm -rf -- "${NGINX_WEBROOT:?}/"*
-  fi
+        # Sanity: required envs
+        : "\${NGINX_WEBROOT}"
+        : "\${FRONTEND_DIR}"
 
-  sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
-  sudo nginx -t && sudo systemctl reload nginx || true
-"""
+        sudo mkdir -p "${NGINX_WEBROOT}"
 
+        if [ -d "${FRONTEND_DIR}/dist" ]; then
+          SRC="${FRONTEND_DIR}/dist"
+        elif [ -d "${FRONTEND_DIR}/build" ]; then
+          SRC="${FRONTEND_DIR}/build"
+        else
+          echo "No frontend build folder found under \${FRONTEND_DIR}"; exit 1
+        fi
 
-          // Backend → PM2 restart
-          sh """
-            set -euo pipefail
-            cd "${BACKEND_DIR}"
-            npm ci --omit=dev
-            if pm2 list | grep -q "${PM2_APP_NAME}"; then
-              pm2 restart "${PM2_APP_NAME}"
-            else
-              pm2 start "npm run start" --name "${PM2_APP_NAME}"
-            fi
-            pm2 save
-          """
-        }
-      }
+        # Explicit safety guards instead of \${VAR:?}
+        if [ -z "${NGINX_WEBROOT}" ] || [ "${NGINX_WEBROOT}" = "/" ]; then
+          echo "Refusing to wipe NGINX_WEBROOT='${NGINX_WEBROOT}'"; exit 1
+        fi
+        if [ ! -d "${NGINX_WEBROOT}" ]; then
+          echo "Target does not exist: ${NGINX_WEBROOT}"; exit 1
+        fi
+
+        # Remove prior contents safely
+        sudo find "${NGINX_WEBROOT}" -mindepth 1 -maxdepth 1 -print -exec sudo rm -rf -- {} +
+
+        # Deploy new static assets
+        sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
+
+        # Validate and reload nginx (ignore reload failure if validation fails)
+        sudo nginx -t && sudo systemctl reload nginx || true
+      """
+
+      // Backend → PM2 restart
+      sh """
+        set -euo pipefail
+
+        : "\${BACKEND_DIR}"
+        : "\${PM2_APP_NAME}"
+
+        cd "${BACKEND_DIR}"
+        npm ci --omit=dev
+
+        # Ensure pm2 is available (adapt if pm2 is installed via nvm)
+        if ! command -v pm2 >/dev/null 2>&1; then
+          echo "pm2 not found in PATH for Jenkins user"; exit 1
+        fi
+
+        if pm2 list | grep -q "${PM2_APP_NAME}"; then
+          pm2 restart "${PM2_APP_NAME}"
+        else
+          pm2 start "npm run start" --name "${PM2_APP_NAME}"
+        fi
+        pm2 save
+      """
     }
   }
+}
+
 
   post {
     success { echo "✅ Build ${env.BUILD_NUMBER} OK on ${env.BRANCH_NAME}" }
