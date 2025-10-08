@@ -1,5 +1,3 @@
-// Jenkinsfile for MediConnect — multibranch-ready, NVM-provisioned Node
-
 pipeline {
   agent any
 
@@ -10,8 +8,9 @@ pipeline {
   }
 
   environment {
-    FRONTEND_DIR = "MediConnect/Frontend/web"   // exact path (lowercase web)
-    BACKEND_DIR  = ""                           // leave empty if no backend
+    // Leave these empty; we’ll auto-detect FRONTEND_DIR
+    FRONTEND_DIR = ""
+    BACKEND_DIR  = ""                       // set later if you add a backend
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
     PM2_APP_NAME  = "MEDICONNECT_API"
     NODE_ENV = "production"
@@ -20,7 +19,6 @@ pipeline {
   }
 
   stages {
-
     stage('Checkout (clean)') {
       steps {
         deleteDir()
@@ -28,12 +26,32 @@ pipeline {
         sh '''
           set -e
           echo "Commit: $(git rev-parse --short HEAD)"
-          echo "package.json (depth<=4):"
-          find . -maxdepth 4 -type f -name package.json -print | sort
-          echo; echo "Listing MediConnect/Frontend:"
-          ls -la ./MediConnect/Frontend || true
-          echo; echo "Listing MediConnect/Frontend/web:"
-          ls -la ./MediConnect/Frontend/web || true
+
+          echo "== package.json candidates (depth<=6) =="
+          find . -maxdepth 6 -type f -name package.json -print | sort
+
+          # Auto-detect FRONTEND_DIR: look for a package.json with vite + react
+          FRONTEND_DIR_CANDIDATE="$(
+            find . -maxdepth 6 -type f -name package.json | while read -r f; do
+              if grep -q '"vite"' "$f" && grep -q '"react"' "$f"; then
+                dirname "$f"
+                break
+              fi
+            done
+          )"
+
+          if [ -z "$FRONTEND_DIR_CANDIDATE" ]; then
+            echo "❌ Could not auto-detect a Vite/React frontend. Please check your repo layout."
+            echo "Tip: ensure your frontend's package.json contains \"vite\" and \"react\"."
+            exit 1
+          fi
+
+          echo "✅ Auto-detected FRONTEND_DIR: $FRONTEND_DIR_CANDIDATE"
+          printf 'FRONTEND_DIR=%s\n' "$FRONTEND_DIR_CANDIDATE" > .ci-paths
+
+          echo
+          echo "== ls of detected FRONTEND_DIR =="
+          ls -la "$FRONTEND_DIR_CANDIDATE" || true
         '''
       }
     }
@@ -51,35 +69,16 @@ pipeline {
             npm -v
           '''
 
-          // Frontend
-          dir("${FRONTEND_DIR}") {
-            sh '''
-              set -e
-              if [ ! -f package.json ]; then
-                echo "❌ package.json not found in $(pwd)"; exit 1
-              fi
-              (''' + NVM_SETUP + '''
-              npm ci --ignore-scripts) || (''' + NVM_SETUP + '''
-              npm install --no-audit --prefer-offline --ignore-scripts)
-            '''
-          }
+          sh '''
+            set -e
+            . ./.ci-paths
+            cd "$FRONTEND_DIR"
+            [ -f package.json ] || { echo "❌ package.json not found in $(pwd)"; exit 1; }
+            (''' + NVM_SETUP + ''' npm ci --ignore-scripts) \
+              || (''' + NVM_SETUP + ''' npm install --no-audit --prefer-offline --ignore-scripts)
+          '''
 
-          // Backend (optional)
-          if (env.BACKEND_DIR?.trim()) {
-            dir("${BACKEND_DIR}") {
-              sh '''
-                set -e
-                if [ -f package.json ]; then
-                  ''' + NVM_SETUP + '''
-                  (npm ci --ignore-scripts) || npm install --no-audit --prefer-offline --ignore-scripts
-                else
-                  echo "Skip backend install: package.json not found"
-                fi
-              '''
-            }
-          } else {
-            echo "Skip backend install: BACKEND_DIR not set"
-          }
+          // If/when you add a backend, set BACKEND_DIR in .ci-paths and add similar block here
         }
       }
     }
@@ -94,20 +93,13 @@ pipeline {
             nvm install 18 >/dev/null
             nvm use 18 >/dev/null
           '''
-          dir("${FRONTEND_DIR}") {
-            sh '''
-              ''' + NVM_SETUP + '''
-              npm run -s lint || true
-            '''
-          }
-          if (env.BACKEND_DIR?.trim()) {
-            dir("${BACKEND_DIR}") {
-              sh '''
-                ''' + NVM_SETUP + '''
-                [ -f package.json ] && (npm test || echo "no tests") || echo "Skip backend tests: package.json not found"
-              '''
-            }
-          }
+          sh '''
+            set -e
+            . ./.ci-paths
+            cd "$FRONTEND_DIR"
+            ''' + NVM_SETUP + '''
+            npm run -s lint || true
+          '''
         }
       }
     }
@@ -122,45 +114,17 @@ pipeline {
             nvm install 18 >/dev/null
             nvm use 18 >/dev/null
           '''
-          dir("${FRONTEND_DIR}") {
-            sh '''
-              ''' + NVM_SETUP + '''
-              npm run build --if-present
-              if [ ! -d dist ] && [ ! -d build ]; then
-                echo "❌ No dist/ or build/ folder created. Ensure your build outputs one of these (Vite default is dist/)."
-                exit 1
-              fi
-            '''
-          }
-        }
-      }
-    }
-
-    stage('Package (backend)') {
-      steps {
-        script {
-          if (env.BACKEND_DIR?.trim()) {
-            dir("${BACKEND_DIR}") {
-              sh '''
-                set -e
-                if [ -f package.json ]; then
-                  rm -rf .release && mkdir -p .release
-                  cp -r package.json package-lock.json .release/ 2>/dev/null || true
-                  if [ -d dist ]; then
-                    cp -r dist .release/
-                  elif [ -d src ]; then
-                    cp -r src .release/
-                  else
-                    echo "Backend has neither dist/ nor src/. Adjust copy if needed."
-                  fi
-                else
-                  echo "Skip backend package: package.json not found"
-                fi
-              '''
-            }
-          } else {
-            echo "Skip backend package: BACKEND_DIR not set"
-          }
+          sh '''
+            set -e
+            . ./.ci-paths
+            cd "$FRONTEND_DIR"
+            ''' + NVM_SETUP + '''
+            npm run build --if-present
+            if [ ! -d dist ] && [ ! -d build ]; then
+              echo "❌ No dist/ or build/ produced by the build. Vite default is dist/."
+              exit 1
+            fi
+          '''
         }
       }
     }
@@ -169,72 +133,50 @@ pipeline {
       when { branch 'main' }
       steps {
         echo "Deploying MediConnect to this EC2"
+        sh '''
+          set -e
+          . ./.ci-paths
+          cd "$FRONTEND_DIR"
 
-        // --- Frontend → Nginx ---
-        dir("${FRONTEND_DIR}") {
-          sh '''
-            set -e
+          : "${NGINX_WEBROOT}"
 
-            : "${NGINX_WEBROOT}"
+          SRC=""
+          if [ -d dist ]; then SRC="dist";
+          elif [ -d build ]; then SRC="build";
+          else echo "Nothing to deploy: no dist/ or build/ in $(pwd)"; exit 1; fi
 
-            SRC=""
-            if [ -d dist ]; then SRC="dist";
-            elif [ -d build ]; then SRC="build";
-            else echo "Nothing to deploy: no dist/ or build/ in $(pwd)"; exit 1; fi
+          sudo mkdir -p "${NGINX_WEBROOT}"
 
-            sudo mkdir -p "${NGINX_WEBROOT}"
+          if [ -z "${NGINX_WEBROOT}" ] || [ "${NGINX_WEBROOT}" = "/" ]; then
+            echo "Refusing to wipe NGINX_WEBROOT='${NGINX_WEBROOT}'"; exit 1
+          fi
+          [ -d "${NGINX_WEBROOT}" ] || { echo "Target does not exist: ${NGINX_WEBROOT}"; exit 1; }
 
-            if [ -z "${NGINX_WEBROOT}" ] || [ "${NGINX_WEBROOT}" = "/" ]; then
-              echo "Refusing to wipe NGINX_WEBROOT='${NGINX_WEBROOT}'"; exit 1
-            fi
-            [ -d "${NGINX_WEBROOT}" ] || { echo "Target does not exist: ${NGINX_WEBROOT}"; exit 1; }
-
-            sudo find "${NGINX_WEBROOT}" -mindepth 1 -maxdepth 1 -print -exec sudo rm -rf -- {} +
-            sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
-            sudo nginx -t && sudo systemctl reload nginx || true
-          '''
-        }
-
-        // --- Backend → PM2 (optional) ---
-        script {
-          if (env.BACKEND_DIR?.trim()) {
-            def NVM_SETUP = '''
-              set -e
-              export NVM_DIR="$HOME/.nvm"
-              [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
-              nvm install 18 >/dev/null
-              nvm use 18 >/dev/null
-            '''
-            dir("${BACKEND_DIR}") {
-              sh '''
-                ''' + NVM_SETUP + '''
-                if [ -f package.json ]; then
-                  (npm ci --omit=dev --ignore-scripts) || npm install --omit=dev --no-audit --prefer-offline --ignore-scripts
-                  if ! command -v pm2 >/dev/null 2>&1; then npm i -g pm2; fi
-                  if pm2 list | grep -q "${PM2_APP_NAME}"; then
-                    pm2 restart "${PM2_APP_NAME}"
-                  else
-                    pm2 start "npm run start" --name "${PM2_APP_NAME}"
-                  fi
-                  pm2 save
-                else
-                  echo "Skip backend deploy: package.json not found"
-                fi
-              '''
-            }
-          } else {
-            echo "Skip backend deploy: BACKEND_DIR not set"
-          }
-        }
+          sudo find "${NGINX_WEBROOT}" -mindepth 1 -maxdepth 1 -print -exec sudo rm -rf -- {} +
+          sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
+          sudo nginx -t && sudo systemctl reload nginx || true
+        '''
       }
     }
-  } // stages
+  }
 
   post {
     success { echo "✅ Build ${env.BUILD_NUMBER} OK on ${env.BRANCH_NAME}" }
     failure { echo "❌ Build ${env.BUILD_NUMBER} FAILED on ${env.BRANCH_NAME}" }
     always {
-      archiveArtifacts allowEmptyArchive: true, artifacts: "${FRONTEND_DIR}/dist/**,${FRONTEND_DIR}/build/**"
+      script {
+        sh '''
+          set -e
+          if [ -f .ci-paths ]; then
+            . ./.ci-paths
+            if [ -n "$FRONTEND_DIR" ]; then
+              echo "Archiving build artifacts from $FRONTEND_DIR"
+              true
+            fi
+          fi
+        '''
+      }
+      archiveArtifacts allowEmptyArchive: true, artifacts: "**/dist/**,**/build/**"
     }
   }
 }
