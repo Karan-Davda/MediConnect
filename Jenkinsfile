@@ -104,20 +104,33 @@ pipeline {
 
           // Frontend → Nginx
           sh """
-            set -euo pipefail
-            sudo mkdir -p "${NGINX_WEBROOT}"
-            if [ -d "${FRONTEND_DIR}/dist" ]; then
-              SRC="${FRONTEND_DIR}/dist"
-            elif [ -d "${FRONTEND_DIR}/build" ]; then
-              SRC="${FRONTEND_DIR}/build"
-            else
-              echo "No frontend build folder found."
-              exit 1
-            fi
-            sudo rm -rf "${NGINX_WEBROOT:?}"/*
-            sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
-            sudo nginx -t && sudo systemctl reload nginx || true
-          """
+  set -euo pipefail
+  sudo mkdir -p "${NGINX_WEBROOT}"
+  if [ -d "${FRONTEND_DIR}/dist" ]; then
+    SRC="${FRONTEND_DIR}/dist"
+  elif [ -d "${FRONTEND_DIR}/build" ]; then
+    SRC="${FRONTEND_DIR}/build"
+  else
+    echo "No frontend build folder found."
+    exit 1
+  fi
+
+  # Explicit guard
+  if [ -z "${NGINX_WEBROOT}" ]; then
+    echo "NGINX_WEBROOT is empty or unset"; exit 1
+  fi
+  # Safer deletion: require non-root path and existing dir
+  if [ "${NGINX_WEBROOT}" = "/" ] || [ "${NGINX_WEBROOT}" = "" ]; then
+    echo "Refusing to wipe ${NGINX_WEBROOT}"; exit 1
+  fi
+  if [ -d "${NGINX_WEBROOT}" ]; then
+    sudo rm -rf -- "${NGINX_WEBROOT:?}/"*
+  fi
+
+  sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
+  sudo nginx -t && sudo systemctl reload nginx || true
+"""
+
 
           // Backend → PM2 restart
           sh """
