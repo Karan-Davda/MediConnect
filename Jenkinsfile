@@ -166,10 +166,9 @@ pipeline {
 
 
   post {
-    success { echo "✅ Build ${env.BUILD_NUMBER} OK on ${env.BRANCH_NAME}" }
-    failure { echo "❌ Build ${env.BUILD_NUMBER} FAILED on ${env.BRANCH_NAME}" }
-    always  {
-      archiveArtifacts allowEmptyArchive: true, artifacts: "${FRONTEND_DIR}/dist/**, ${FRONTEND_DIR}/build/**"
-    }
+  success { echo "✅ Build ${env.BUILD_NUMBER} OK on ${env.BRANCH_NAME}" }
+  failure { echo "❌ Build ${env.BUILD_NUMBER} FAILED on ${env.BRANCH_NAME}" }
+  always  {
+    archiveArtifacts allowEmptyArchive: true, artifacts: "${FRONTEND_DIR}/dist/**,${FRONTEND_DIR}/build/**"
   }
 }
