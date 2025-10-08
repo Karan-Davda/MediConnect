@@ -4,20 +4,29 @@ pipeline {
   agent any
 
   options {
+    ansiColor('xterm')
     timestamps()
     buildDiscarder(logRotator(numToKeepStr: '20'))
     timeout(time: 30, unit: 'MINUTES')
   }
 
+  parameters {
+    booleanParam(name: 'RUN_DEPLOY', defaultValue: false, description: 'Deploy frontend (and backend via PM2) on this machine')
+  }
+
   environment {
-    // Adjust these if your repo layout differs:
-    FRONTEND_DIR  = "Frontend/web"         // seen in logs
-    BACKEND_DIR   = "Backend"              // change if not present
+    // Adjust if your repo layout differs:
+    FRONTEND_DIR  = "Frontend/web"
+    BACKEND_DIR   = "Backend"
+
+    // Only used if RUN_DEPLOY = true
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
     PM2_APP_NAME  = "MEDICONNECT_API"
+
     NODE_ENV      = "production"
     TERM          = "xterm-256color"
     FORCE_COLOR   = "1"
+    NVM_NODE_MAJOR = "22" // Vite-compatible Node
   }
 
   stages {
@@ -29,9 +38,26 @@ pipeline {
 set -Eeuo pipefail
 echo "Commit: $(git rev-parse --short HEAD)"
 echo "package.json files (depth<=4):"
-find . -maxdepth 4 -type f -name package.json -print | sort
+find . -maxdepth 4 -type f -name package.json -print | sort || true
 echo; echo "Listing ${FRONTEND_DIR}:"
 ls -la "${FRONTEND_DIR}" || true
+'''
+      }
+    }
+
+    stage('Install Node (NVM)') {
+      steps {
+        sh '''#!/usr/bin/env bash
+set -Eeuo pipefail
+export NVM_DIR="$HOME/.nvm"
+if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+fi
+. "$NVM_DIR/nvm.sh"
+nvm install "${NVM_NODE_MAJOR}"
+nvm use "${NVM_NODE_MAJOR}"
+echo "Using Node: $(node -v)"
+echo "Using npm:  $(npm -v)"
 '''
       }
     }
@@ -40,23 +66,17 @@ ls -la "${FRONTEND_DIR}" || true
       steps {
         script {
           def NVM_SETUP = '''
-set -e
+set -Eeuo pipefail
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
-  || (curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
-nvm install 18 >/dev/null
-nvm use 18 >/dev/null
-node -v
-npm -v
+. "$NVM_DIR/nvm.sh"
+nvm use "${NVM_NODE_MAJOR}" >/dev/null
 '''
 
-          // Frontend
+          // Frontend dev deps (tsc, vite) included
           sh """#!/usr/bin/env bash
-set -Eeuo pipefail
 ${NVM_SETUP}
 if [[ -f "\${FRONTEND_DIR}/package.json" ]]; then
   cd "\${FRONTEND_DIR}"
-  # Install dev deps too (tsc, vite, etc.)
   NPM_CONFIG_PRODUCTION=false npm ci --include=dev \
     || NPM_CONFIG_PRODUCTION=false npm install --no-audit --prefer-offline
 else
@@ -64,9 +84,8 @@ else
 fi
 """
 
-          // Backend (optional)
+          // Backend optional
           sh """#!/usr/bin/env bash
-set -Eeuo pipefail
 ${NVM_SETUP}
 if [[ -f "\${BACKEND_DIR}/package.json" ]]; then
   cd "\${BACKEND_DIR}"
@@ -83,25 +102,24 @@ fi
       steps {
         script {
           def NVM_SETUP = '''
-set -e
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
-  || (curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
-nvm install 18 >/dev/null
-nvm use 18 >/dev/null
-'''
-          sh """#!/usr/bin/env bash
 set -Eeuo pipefail
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh"
+nvm use "${NVM_NODE_MAJOR}" >/dev/null
+'''
+          // Frontend lint (optional)
+          sh """#!/usr/bin/env bash
 ${NVM_SETUP}
 if [[ -f "\${FRONTEND_DIR}/package.json" ]]; then
   cd "\${FRONTEND_DIR}"
-  npm run -s lint || true
+  npm run -s lint || echo "No lint or lint failed (non-blocking)"
 else
   echo "Skip frontend lint: package.json not found"
 fi
 """
+
+          // Backend tests (optional)
           sh """#!/usr/bin/env bash
-set -Eeuo pipefail
 ${NVM_SETUP}
 if [[ -f "\${BACKEND_DIR}/package.json" ]]; then
   cd "\${BACKEND_DIR}"
@@ -118,21 +136,18 @@ fi
       steps {
         script {
           def NVM_SETUP = '''
-set -e
+set -Eeuo pipefail
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
-  || (curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
-nvm install 18 >/dev/null
-nvm use 18 >/dev/null
+. "$NVM_DIR/nvm.sh"
+nvm use "${NVM_NODE_MAJOR}" >/dev/null
 '''
           sh """#!/usr/bin/env bash
-set -Eeuo pipefail
 ${NVM_SETUP}
 if [[ -f "\${FRONTEND_DIR}/package.json" ]]; then
   cd "\${FRONTEND_DIR}"
-  # Ensure tsc is available even if not in PATH
+  # Make sure TypeScript is callable if project uses it
   npx --yes tsc -v >/dev/null 2>&1 || true
-  # Build (Vite apps usually output to dist/)
+  # Vite/CRA build
   NPM_CONFIG_PRODUCTION=false npm run build --if-present || npx --yes vite build
   if [[ ! -d dist && ! -d build ]]; then
     echo "❌ No dist/ or build/ folder created. Ensure your build script outputs one of these."
@@ -169,15 +184,19 @@ fi
       }
     }
 
-    stage('Deploy') {
-      when { branch 'main' }
+    stage('Deploy (optional)') {
+      when {
+        allOf {
+          branch 'main'
+          expression { return params.RUN_DEPLOY }
+        }
+      }
       steps {
-        echo "Deploying Mediconnect to this EC2"
+        echo "Deploying Mediconnect on this machine"
 
-        // --- Frontend → Nginx ---
+        // --- Frontend → Nginx (optional/local safe) ---
         sh '''#!/usr/bin/env bash
 set -Eeuo pipefail
-
 : "${NGINX_WEBROOT}"
 : "${FRONTEND_DIR}"
 
@@ -187,12 +206,8 @@ if [[ ! -d "${FRONTEND_DIR}/dist" && ! -d "${FRONTEND_DIR}/build" ]]; then
 fi
 
 sudo mkdir -p "${NGINX_WEBROOT}"
-
-if [[ -d "${FRONTEND_DIR}/dist" ]]; then
-  SRC="${FRONTEND_DIR}/dist"
-else
-  SRC="${FRONTEND_DIR}/build"
-fi
+SRC="${FRONTEND_DIR}/dist"
+[[ -d "${FRONTEND_DIR}/build" && ! -d "${FRONTEND_DIR}/dist" ]] && SRC="${FRONTEND_DIR}/build"
 
 if [[ -z "${NGINX_WEBROOT}" || "${NGINX_WEBROOT}" = "/" ]]; then
   echo "Refusing to wipe NGINX_WEBROOT='${NGINX_WEBROOT}'"
@@ -202,21 +217,28 @@ fi
 
 sudo find "${NGINX_WEBROOT}" -mindepth 1 -maxdepth 1 -print -exec sudo rm -rf -- {} +
 sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
-sudo nginx -t && sudo systemctl reload nginx || true
+
+# Try to reload Nginx on Mac or Linux
+if command -v nginx >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1 && brew services list | grep -q nginx; then
+    nginx -t && brew services restart nginx || true
+  elif command -v systemctl >/dev/null 2>&1; then
+    nginx -t && sudo systemctl reload nginx || true
+  else
+    nginx -t && sudo service nginx reload || true
+  fi
+fi
 '''
 
         // --- Backend → PM2 (optional) ---
         script {
           def NVM_SETUP = '''
-set -e
+set -Eeuo pipefail
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
-  || (curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
-nvm install 18 >/dev/null
-nvm use 18 >/dev/null
+. "$NVM_DIR/nvm.sh"
+nvm use "${NVM_NODE_MAJOR}" >/dev/null
 '''
           sh """#!/usr/bin/env bash
-set -Eeuo pipefail
 ${NVM_SETUP}
 if [[ -f "\${BACKEND_DIR}/package.json" ]]; then
   cd "\${BACKEND_DIR}"
@@ -229,7 +251,7 @@ if [[ -f "\${BACKEND_DIR}/package.json" ]]; then
   else
     pm2 start "npm run start" --name "${PM2_APP_NAME}"
   fi
-  pm2 save
+  pm2 save || true
 else
   echo "Skip backend deploy: \${BACKEND_DIR}/package.json not found"
 fi
@@ -243,8 +265,9 @@ fi
     success { echo "✅ Build ${env.BUILD_NUMBER} OK on ${env.BRANCH_NAME}" }
     failure { echo "❌ Build ${env.BUILD_NUMBER} FAILED on ${env.BRANCH_NAME}" }
     always {
-      // Keep simple/globbed so it works regardless of exact paths
+      // Archive built assets (works regardless of exact paths)
       archiveArtifacts allowEmptyArchive: true, artifacts: "**/dist/**,**/build/**"
     }
   }
 }
+
