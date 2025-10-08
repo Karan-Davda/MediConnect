@@ -1,4 +1,5 @@
-// Jenkinsfile for Mediconnet (Multibranch-ready) — uses NVM to provide Node/npm on agent
+// Jenkinsfile — MediConnect (multibranch)
+// Uses NVM (Node 18) per-shell so node/npm are always available.
 
 pipeline {
   agent any
@@ -10,10 +11,12 @@ pipeline {
   }
 
   environment {
-    FRONTEND_DIR = "MediConnect/Frontend/Web"   // <-- fix spelling/case
-    BACKEND_DIR  = "MediConnect/Backend"       // <-- fix if this actually exists
-    NGINX_WEBROOT = "/var/www/MEDICONNET_FRONTEND"
-    PM2_APP_NAME  = "MEDICONNET_API"
+    // Repo layout (case-sensitive)
+    FRONTEND_DIR = "MediConnect/Frontend/web"
+    BACKEND_DIR  = ""                                   // set if/when you add a backend
+    // Deploy targets (adjust for your server)
+    NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
+    PM2_APP_NAME  = "MEDICONNECT_API"
     NODE_ENV = "production"
     TERM = "xterm-256color"
     FORCE_COLOR = "1"
@@ -26,8 +29,8 @@ pipeline {
         checkout scm
         sh '''
           git rev-parse --short HEAD
-          echo "Workspace tree (depth 3):"
-          find . -maxdepth 3 -type f -name package.json -print
+          echo "Workspace package.json files (depth 4):"
+          find . -maxdepth 4 -type f -name package.json -print | sed "s#^./##"
           echo "Listing expected frontend dir:"
           ls -la "${FRONTEND_DIR}" || true
         '''
@@ -46,24 +49,27 @@ pipeline {
             node -v
             npm -v
           '''
+
           // Frontend
           sh """
             ${NVM_SETUP}
             if [ -f "${FRONTEND_DIR}/package.json" ]; then
               cd "${FRONTEND_DIR}"
-              npm ci || npm install
+              if [ -f package-lock.json ]; then npm ci; else npm install; fi
             else
-              echo "Skip frontend install: ${FRONTEND_DIR}/package.json not found"
+              echo "⚠️  Skip frontend install: ${FRONTEND_DIR}/package.json not found"
+              exit 1
             fi
           """
-          // Backend (guard for empty folder)
+
+          // Backend (optional)
           sh """
             ${NVM_SETUP}
-            if [ -f "${BACKEND_DIR}/package.json" ]; then
+            if [ -n "${BACKEND_DIR}" ] && [ -f "${BACKEND_DIR}/package.json" ]; then
               cd "${BACKEND_DIR}"
-              npm ci || npm install
+              if [ -f package-lock.json ]; then npm ci; else npm install; fi
             else
-              echo "Skip backend install: ${BACKEND_DIR}/package.json not found"
+              echo "ℹ️  Skip backend install: no BACKEND_DIR or package.json"
             fi
           """
         }
@@ -80,24 +86,22 @@ pipeline {
             nvm install 18 >/dev/null
             nvm use 18 >/dev/null
           '''
-          // Frontend lint is optional
+
+          // Frontend lint (non-fatal)
           sh """
             ${NVM_SETUP}
-            if [ -f "${FRONTEND_DIR}/package.json" ]; then
-              cd "${FRONTEND_DIR}"
-              npm run -s lint || true
-            else
-              echo "Skip frontend lint: package.json not found"
-            fi
+            cd "${FRONTEND_DIR}"
+            npm run -s lint || true
           """
-          // Backend tests are optional
+
+          // Backend tests (non-fatal & optional)
           sh """
             ${NVM_SETUP}
-            if [ -f "${BACKEND_DIR}/package.json" ]; then
+            if [ -n "${BACKEND_DIR}" ] && [ -f "${BACKEND_DIR}/package.json" ]; then
               cd "${BACKEND_DIR}"
               npm test || echo "no tests"
             else
-              echo "Skip backend tests: package.json not found"
+              echo "ℹ️  Skip backend tests: no BACKEND_DIR or package.json"
             fi
           """
         }
@@ -116,15 +120,10 @@ pipeline {
           '''
           sh """
             ${NVM_SETUP}
-            if [ -f "${FRONTEND_DIR}/package.json" ]; then
-              cd "${FRONTEND_DIR}"
-              npm run build --if-present
-              if [ ! -d dist ] && [ ! -d build ]; then
-                echo "No dist/ or build/ folder created. Ensure your build script outputs one of these."
-                exit 1
-              fi
-            else
-              echo "Skip frontend build: package.json not found"
+            cd "${FRONTEND_DIR}"
+            npm run build
+            if [ ! -d dist ] && [ ! -d build ]; then
+              echo "❌ No dist/ or build/ folder created by frontend build."
               exit 1
             fi
           """
@@ -133,22 +132,21 @@ pipeline {
     }
 
     stage('Package (backend)') {
+      when {
+        expression { return env.BACKEND_DIR?.trim() && fileExists("${env.BACKEND_DIR}/package.json") }
+      }
       steps {
         sh '''
           set -euo pipefail
-          if [ -d "${BACKEND_DIR}" ] && [ -f "${BACKEND_DIR}/package.json" ]; then
-            cd "${BACKEND_DIR}"
-            rm -rf .release && mkdir -p .release
-            cp -r package.json package-lock.json .release/ 2>/dev/null || true
-            if [ -d dist ]; then
-              cp -r dist .release/
-            elif [ -d src ]; then
-              cp -r src .release/
-            else
-              echo "Backend has neither dist/ nor src/. Add your build or adjust copy."
-            fi
+          cd "${BACKEND_DIR}"
+          rm -rf .release && mkdir -p .release
+          cp -r package.json package-lock.json .release/ 2>/dev/null || true
+          if [ -d dist ]; then
+            cp -r dist .release/
+          elif [ -d src ]; then
+            cp -r src .release/
           else
-            echo "Skip backend package: ${BACKEND_DIR}/package.json not found"
+            echo "ℹ️  Backend has neither dist/ nor src/. Adjust as needed."
           fi
         '''
       }
@@ -157,7 +155,7 @@ pipeline {
     stage('Deploy') {
       when { branch 'main' }
       steps {
-        echo "Deploying Mediconnet to this EC2"
+        echo "Deploying MediConnect to this EC2"
 
         // --- Frontend → Nginx ---
         sh """
@@ -166,30 +164,28 @@ pipeline {
           : "\${NGINX_WEBROOT}"
           : "\${FRONTEND_DIR}"
 
-          if [ ! -d "${FRONTEND_DIR}/dist" ] && [ ! -d "${FRONTEND_DIR}/build" ]; then
-            echo "Nothing to deploy: no dist/ or build/ under ${FRONTEND_DIR}"
+          SRC=""
+          if [ -d "${FRONTEND_DIR}/dist" ]; then
+            SRC="${FRONTEND_DIR}/dist"
+          elif [ -d "${FRONTEND_DIR}/build" ]; then
+            SRC="${FRONTEND_DIR}/build"
+          else
+            echo "❌ Nothing to deploy: no dist/ or build/ under ${FRONTEND_DIR}"
             exit 1
           fi
 
           sudo mkdir -p "${NGINX_WEBROOT}"
 
-          if [ -d "${FRONTEND_DIR}/dist" ]; then
-            SRC="${FRONTEND_DIR}/dist"
-          else
-            SRC="${FRONTEND_DIR}/build"
-          fi
-
+          # Safety guard
           if [ -z "${NGINX_WEBROOT}" ] || [ "${NGINX_WEBROOT}" = "/" ]; then
             echo "Refusing to wipe NGINX_WEBROOT='${NGINX_WEBROOT}'"; exit 1
           fi
-          if [ ! -d "${NGINX_WEBROOT}" ]; then
-            echo "Target does not exist: ${NGINX_WEBROOT}"; exit 1
-          fi
 
+          # Wipe previous contents and copy new static assets
           sudo find "${NGINX_WEBROOT}" -mindepth 1 -maxdepth 1 -print -exec sudo rm -rf -- {} +
-
           sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
 
+          # Reload nginx if config is valid
           sudo nginx -t && sudo systemctl reload nginx || true
         """
 
@@ -204,12 +200,14 @@ pipeline {
           '''
           sh """
             ${NVM_SETUP}
-            if [ -f "${BACKEND_DIR}/package.json" ]; then
+            if [ -n "${BACKEND_DIR}" ] && [ -f "${BACKEND_DIR}/package.json" ]; then
               cd "${BACKEND_DIR}"
-              npm ci --omit=dev || npm install --omit=dev
+              if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+
               if ! command -v pm2 >/dev/null 2>&1; then
                 npm i -g pm2
               fi
+
               if pm2 list | grep -q "${PM2_APP_NAME}"; then
                 pm2 restart "${PM2_APP_NAME}"
               else
@@ -217,7 +215,7 @@ pipeline {
               fi
               pm2 save
             else
-              echo "Skip backend deploy: ${BACKEND_DIR}/package.json not found"
+              echo "ℹ️  Skip backend deploy: no BACKEND_DIR or package.json"
             fi
           """
         }
@@ -229,6 +227,7 @@ pipeline {
     success { echo "✅ Build ${env.BUILD_NUMBER} OK on ${env.BRANCH_NAME}" }
     failure { echo "❌ Build ${env.BUILD_NUMBER} FAILED on ${env.BRANCH_NAME}" }
     always {
+      // Archive whichever folder Vite/React produced
       archiveArtifacts allowEmptyArchive: true, artifacts: "${FRONTEND_DIR}/dist/**,${FRONTEND_DIR}/build/**"
     }
   }
