@@ -172,3 +172,4 @@ pipeline {
     archiveArtifacts allowEmptyArchive: true, artifacts: "${FRONTEND_DIR}/dist/**,${FRONTEND_DIR}/build/**"
   }
 }
+  }
