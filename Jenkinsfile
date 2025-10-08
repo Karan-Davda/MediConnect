@@ -10,10 +10,8 @@ pipeline {
   }
 
   environment {
-    // 👇 exact path (lowercase "web")
-    FRONTEND_DIR = "MediConnect/Frontend/web"
-    // leave empty if you truly have no backend, otherwise point it correctly
-    BACKEND_DIR  = ""
+    FRONTEND_DIR = "MediConnect/Frontend/web"   // exact path (lowercase web)
+    BACKEND_DIR  = ""                           // leave empty if no backend
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
     PM2_APP_NAME  = "MEDICONNECT_API"
     NODE_ENV = "production"
@@ -25,7 +23,6 @@ pipeline {
 
     stage('Checkout (clean)') {
       steps {
-        // Nukes any stale folders/casing before pulling code
         deleteDir()
         checkout scm
         sh '''
@@ -56,32 +53,33 @@ pipeline {
 
           // Frontend
           dir("${FRONTEND_DIR}") {
-            sh """
-              ${NVM_SETUP}
+            sh '''
+              set -e
               if [ ! -f package.json ]; then
-                echo "❌ ${FRONTEND_DIR}/package.json not found"; exit 1
+                echo "❌ package.json not found in $(pwd)"; exit 1
               fi
               # Prefer reproducible CI, fall back if no lockfile
-              (npm ci --ignore-scripts) || npm install --no-audit --prefer-offline --ignore-scripts
-            """
+              (''' + NVM_SETUP + '''
+              npm ci --ignore-scripts) || (''' + NVM_SETUP + '''
+              npm install --no-audit --prefer-offline --ignore-scripts)
+            '''
           }
 
           // Backend (optional)
-          script {
-            if (env.BACKEND_DIR?.trim()) {
-              dir("${BACKEND_DIR}") {
-                sh """
-                  ${NVM_SETUP}
-                  if [ -f package.json ]; then
-                    (npm ci --ignore-scripts) || npm install --no-audit --prefer-offline --ignore-scripts
-                  else
-                    echo "Skip backend install: package.json not found"
-                  fi
-                """
-              }
-            } else {
-              echo "Skip backend install: BACKEND_DIR not set"
+          if (env.BACKEND_DIR?.trim()) {
+            dir("${BACKEND_DIR}") {
+              sh '''
+                set -e
+                if [ -f package.json ]; then
+                  ''' + NVM_SETUP + '''
+                  (npm ci --ignore-scripts) || npm install --no-audit --prefer-offline --ignore-scripts
+                else
+                  echo "Skip backend install: package.json not found"
+                fi
+              '''
             }
+          } else {
+            echo "Skip backend install: BACKEND_DIR not set"
           }
         }
       }
@@ -98,19 +96,17 @@ pipeline {
             nvm use 18 >/dev/null
           '''
           dir("${FRONTEND_DIR}") {
-            sh """
-              ${NVM_SETUP}
+            sh '''
+              ''' + NVM_SETUP + '''
               npm run -s lint || true
-            """
+            '''
           }
-          script {
-            if (env.BACKEND_DIR?.trim()) {
-              dir("${BACKEND_DIR}") {
-                sh """
-                  ${NVM_SETUP}
-                  [ -f package.json ] && (npm test || echo "no tests") || echo "Skip backend tests: package.json not found"
-                """
-              }
+          if (env.BACKEND_DIR?.trim()) {
+            dir("${BACKEND_DIR}") {
+              sh '''
+                ''' + NVM_SETUP + '''
+                [ -f package.json ] && (npm test || echo "no tests") || echo "Skip backend tests: package.json not found"
+              '''
             }
           }
         }
@@ -128,15 +124,14 @@ pipeline {
             nvm use 18 >/dev/null
           '''
           dir("${FRONTEND_DIR}") {
-            sh """
-              ${NVM_SETUP}
+            sh '''
+              ''' + NVM_SETUP + '''
               npm run build --if-present
               if [ ! -d dist ] && [ ! -d build ]; then
-                echo "❌ No dist/ or build/ folder created. Ensure your build outputs one of these."
-                echo "   (Vite default is dist/)"
+                echo "❌ No dist/ or build/ folder created. Ensure your build outputs one of these (Vite default is dist/)."
                 exit 1
               fi
-            """
+            '''
           }
         }
       }
@@ -178,10 +173,10 @@ pipeline {
 
         // --- Frontend → Nginx ---
         dir("${FRONTEND_DIR}") {
-          sh """
+          sh '''
             set -euo pipefail
 
-            : "\${NGINX_WEBROOT}"
+            : "${NGINX_WEBROOT}"
 
             SRC=""
             if [ -d dist ]; then SRC="dist";
@@ -198,7 +193,7 @@ pipeline {
             sudo find "${NGINX_WEBROOT}" -mindepth 1 -maxdepth 1 -print -exec sudo rm -rf -- {} +
             sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
             sudo nginx -t && sudo systemctl reload nginx || true
-          """
+          '''
         }
 
         // --- Backend → PM2 (optional) ---
@@ -212,8 +207,8 @@ pipeline {
               nvm use 18 >/dev/null
             '''
             dir("${BACKEND_DIR}") {
-              sh """
-                ${NVM_SETUP}
+              sh '''
+                ''' + NVM_SETUP + '''
                 if [ -f package.json ]; then
                   (npm ci --omit=dev --ignore-scripts) || npm install --omit=dev --no-audit --prefer-offline --ignore-scripts
                   if ! command -v pm2 >/dev/null 2>&1; then npm i -g pm2; fi
@@ -226,7 +221,7 @@ pipeline {
                 else
                   echo "Skip backend deploy: package.json not found"
                 fi
-              """
+              '''
             }
           } else {
             echo "Skip backend deploy: BACKEND_DIR not set"
