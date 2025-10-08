@@ -1,12 +1,21 @@
 {
   "name": "mediconnect",
   "version": "1.0.0",
-  "description": "",
+  "description": "MediConnect is a comprehensive digital platform designed for small and mid-sized medical practices to streamline clinic operations. It integrates appointment scheduling, electronic medical records, billing, and insurance claim management into one unified system. Patients benefit from a user-friendly booking experience, while doctors and staff gain simplified workflows and reporting.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Karan-Davda/MediConnect.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Karan-Davda/MediConnect/issues"
+  },
+  "homepage": "https://github.com/Karan-Davda/MediConnect#readme"
 }
