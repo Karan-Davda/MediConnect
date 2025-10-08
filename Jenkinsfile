@@ -1,4 +1,4 @@
-// Jenkinsfile for MediConnect — multibranch-friendly, Node via NVM
+// Jenkinsfile for Mediconnet (Multibranch-ready) — uses NVM to provide Node/npm on agent
 
 pipeline {
   agent any
@@ -10,14 +10,10 @@ pipeline {
   }
 
   environment {
-    // === PATHS (match your repo) ===
-    FRONTEND_DIR = "MediConnect/Frontend/web"
-    BACKEND_DIR  = ""  // set to folder if/when backend exists, e.g. "MediConnect/Backend"
-
-    // === DEPLOY TARGETS (adjust to your server) ===
-    NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
-    PM2_APP_NAME  = "MEDICONNECT_API"
-
+    FRONTEND_DIR = "MediConnect/Frontend/Web"   // <-- fix spelling/case
+    BACKEND_DIR  = "MediConnect/Backend"       // <-- fix if this actually exists
+    NGINX_WEBROOT = "/var/www/MEDICONNET_FRONTEND"
+    PM2_APP_NAME  = "MEDICONNET_API"
     NODE_ENV = "production"
     TERM = "xterm-256color"
     FORCE_COLOR = "1"
@@ -29,11 +25,10 @@ pipeline {
       steps {
         checkout scm
         sh '''
-          set -e
-          echo "Commit: $(git rev-parse --short HEAD)"
-          echo "package.json files (depth<=3):"
+          git rev-parse --short HEAD
+          echo "Workspace tree (depth 3):"
           find . -maxdepth 3 -type f -name package.json -print
-          echo "List frontend dir:"
+          echo "Listing expected frontend dir:"
           ls -la "${FRONTEND_DIR}" || true
         '''
       }
@@ -45,53 +40,32 @@ pipeline {
           def NVM_SETUP = '''
             set -e
             export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
-              || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
             nvm install 18 >/dev/null
             nvm use 18 >/dev/null
             node -v
             npm -v
-            npm config set fund false
-            npm config set audit false
           '''
-
-          // --- Frontend ---
+          // Frontend
           sh """
             ${NVM_SETUP}
             if [ -f "${FRONTEND_DIR}/package.json" ]; then
               cd "${FRONTEND_DIR}"
-              if [ -f package-lock.json ]; then
-                echo "Using npm ci (ignore scripts)…"
-                npm ci --ignore-scripts --no-audit --no-fund
-              else
-                echo "No lockfile; using npm install (ignore scripts)…"
-                npm install --ignore-scripts --no-audit --no-fund
-              fi
+              npm ci || npm install
             else
-              echo "❌ ${FRONTEND_DIR}/package.json not found"; exit 1
+              echo "Skip frontend install: ${FRONTEND_DIR}/package.json not found"
             fi
           """
-
-          // --- Backend (optional) ---
+          // Backend (guard for empty folder)
           sh """
             ${NVM_SETUP}
-            if [ -n "${BACKEND_DIR}" ] && [ -f "${BACKEND_DIR}/package.json" ]; then
+            if [ -f "${BACKEND_DIR}/package.json" ]; then
               cd "${BACKEND_DIR}"
-              if [ -f package-lock.json ]; then
-                npm ci --ignore-scripts --no-audit --no-fund
-              else
-                npm install --ignore-scripts --no-audit --no-fund
-              fi
+              npm ci || npm install
             else
-              echo "ℹ️  Skip backend install: no BACKEND_DIR or package.json"
+              echo "Skip backend install: ${BACKEND_DIR}/package.json not found"
             fi
           """
-        }
-      }
-      post {
-        unsuccessful {
-          // show npm debug logs to aid triage
-          sh 'ls -1 ~/.npm/_logs || true; tail -n +1 ~/.npm/_logs/* 2>/dev/null || true'
         }
       }
     }
@@ -102,23 +76,28 @@ pipeline {
           def NVM_SETUP = '''
             set -e
             export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
-              || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
             nvm install 18 >/dev/null
             nvm use 18 >/dev/null
           '''
-          // Frontend lint (non-blocking)
+          // Frontend lint is optional
           sh """
             ${NVM_SETUP}
-            cd "${FRONTEND_DIR}"
-            npm run -s lint || true
+            if [ -f "${FRONTEND_DIR}/package.json" ]; then
+              cd "${FRONTEND_DIR}"
+              npm run -s lint || true
+            else
+              echo "Skip frontend lint: package.json not found"
+            fi
           """
-          // Backend tests (optional, non-blocking)
+          // Backend tests are optional
           sh """
             ${NVM_SETUP}
-            if [ -n "${BACKEND_DIR}" ] && [ -f "${BACKEND_DIR}/package.json" ]; then
+            if [ -f "${BACKEND_DIR}/package.json" ]; then
               cd "${BACKEND_DIR}"
               npm test || echo "no tests"
+            else
+              echo "Skip backend tests: package.json not found"
             fi
           """
         }
@@ -131,19 +110,21 @@ pipeline {
           def NVM_SETUP = '''
             set -e
             export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
-              || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
             nvm install 18 >/dev/null
             nvm use 18 >/dev/null
           '''
           sh """
             ${NVM_SETUP}
-            cd "${FRONTEND_DIR}"
-            # run your own build scripts even though dependency scripts were skipped
-            npm run build --if-present
-
-            if [ ! -d dist ] && [ ! -d build ]; then
-              echo "No dist/ or build/ folder created. Ensure 'npm run build' outputs one of these."
+            if [ -f "${FRONTEND_DIR}/package.json" ]; then
+              cd "${FRONTEND_DIR}"
+              npm run build --if-present
+              if [ ! -d dist ] && [ ! -d build ]; then
+                echo "No dist/ or build/ folder created. Ensure your build script outputs one of these."
+                exit 1
+              fi
+            else
+              echo "Skip frontend build: package.json not found"
               exit 1
             fi
           """
@@ -155,7 +136,7 @@ pipeline {
       steps {
         sh '''
           set -euo pipefail
-          if [ -n "${BACKEND_DIR}" ] && [ -f "${BACKEND_DIR}/package.json" ]; then
+          if [ -d "${BACKEND_DIR}" ] && [ -f "${BACKEND_DIR}/package.json" ]; then
             cd "${BACKEND_DIR}"
             rm -rf .release && mkdir -p .release
             cp -r package.json package-lock.json .release/ 2>/dev/null || true
@@ -164,10 +145,10 @@ pipeline {
             elif [ -d src ]; then
               cp -r src .release/
             else
-              echo "Backend has neither dist/ nor src/. Adjust as needed."
+              echo "Backend has neither dist/ nor src/. Add your build or adjust copy."
             fi
           else
-            echo "Skip backend package."
+            echo "Skip backend package: ${BACKEND_DIR}/package.json not found"
           fi
         '''
       }
@@ -176,29 +157,34 @@ pipeline {
     stage('Deploy') {
       when { branch 'main' }
       steps {
-        echo "Deploying MediConnect to this EC2"
+        echo "Deploying Mediconnet to this EC2"
 
         // --- Frontend → Nginx ---
         sh """
           set -euo pipefail
+
           : "\${NGINX_WEBROOT}"
           : "\${FRONTEND_DIR}"
 
-          if [ -d "${FRONTEND_DIR}/dist" ]; then
-            SRC="${FRONTEND_DIR}/dist"
-          elif [ -d "${FRONTEND_DIR}/build" ]; then
-            SRC="${FRONTEND_DIR}/build"
-          else
-            echo "Nothing to deploy: no dist/ or build/ in ${FRONTEND_DIR}"
+          if [ ! -d "${FRONTEND_DIR}/dist" ] && [ ! -d "${FRONTEND_DIR}/build" ]; then
+            echo "Nothing to deploy: no dist/ or build/ under ${FRONTEND_DIR}"
             exit 1
           fi
 
           sudo mkdir -p "${NGINX_WEBROOT}"
 
+          if [ -d "${FRONTEND_DIR}/dist" ]; then
+            SRC="${FRONTEND_DIR}/dist"
+          else
+            SRC="${FRONTEND_DIR}/build"
+          fi
+
           if [ -z "${NGINX_WEBROOT}" ] || [ "${NGINX_WEBROOT}" = "/" ]; then
             echo "Refusing to wipe NGINX_WEBROOT='${NGINX_WEBROOT}'"; exit 1
           fi
-          [ -d "${NGINX_WEBROOT}" ] || { echo "Target does not exist: ${NGINX_WEBROOT}"; exit 1; }
+          if [ ! -d "${NGINX_WEBROOT}" ]; then
+            echo "Target does not exist: ${NGINX_WEBROOT}"; exit 1
+          fi
 
           sudo find "${NGINX_WEBROOT}" -mindepth 1 -maxdepth 1 -print -exec sudo rm -rf -- {} +
 
@@ -207,26 +193,20 @@ pipeline {
           sudo nginx -t && sudo systemctl reload nginx || true
         """
 
-        // --- Backend → PM2 (only if defined) ---
+        // --- Backend → PM2 (only if backend exists) ---
         script {
           def NVM_SETUP = '''
             set -e
             export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
-              || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
             nvm install 18 >/dev/null
             nvm use 18 >/dev/null
           '''
           sh """
             ${NVM_SETUP}
-            if [ -n "${BACKEND_DIR}" ] && [ -f "${BACKEND_DIR}/package.json" ]; then
+            if [ -f "${BACKEND_DIR}/package.json" ]; then
               cd "${BACKEND_DIR}"
-              # install runtime deps only, still ignoring scripts for safety
-              if [ -f package-lock.json ]; then
-                npm ci --omit=dev --ignore-scripts --no-audit --no-fund
-              else
-                npm install --omit=dev --ignore-scripts --no-audit --no-fund
-              fi
+              npm ci --omit=dev || npm install --omit=dev
               if ! command -v pm2 >/dev/null 2>&1; then
                 npm i -g pm2
               fi
@@ -237,7 +217,7 @@ pipeline {
               fi
               pm2 save
             else
-              echo "Skip backend deploy."
+              echo "Skip backend deploy: ${BACKEND_DIR}/package.json not found"
             fi
           """
         }
