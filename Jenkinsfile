@@ -10,7 +10,7 @@ pipeline {
   }
 
   environment {
-    FRONTEND_DIR = "MediConnect/Frontend/Web"   // <-- fix spelling/case
+    FRONTEND_DIR = "MediConnect/Frontend/web"   // <-- fix spelling/case
     BACKEND_DIR  = "MediConnect/Backend"       // <-- fix if this actually exists
     NGINX_WEBROOT = "/var/www/MEDICONNET_FRONTEND"
     PM2_APP_NAME  = "MEDICONNET_API"
