@@ -1,273 +1,156 @@
-// Jenkinsfile for Mediconnect (Multibranch-ready) — Node via NVM on agent
-
 pipeline {
   agent any
 
   options {
-    ansiColor('xterm')
     timestamps()
     buildDiscarder(logRotator(numToKeepStr: '20'))
     timeout(time: 30, unit: 'MINUTES')
   }
 
   parameters {
-    booleanParam(name: 'RUN_DEPLOY', defaultValue: false, description: 'Deploy frontend (and backend via PM2) on this machine')
+    booleanParam(name: 'DO_DEPLOY', defaultValue: false, description: 'Deploy locally on this Mac after build?')
   }
 
   environment {
-    // Adjust if your repo layout differs:
     FRONTEND_DIR  = "Frontend/web"
     BACKEND_DIR   = "Backend"
-
-    // Only used if RUN_DEPLOY = true
+    // Default webroot (Linux). We’ll override for macOS inside the stage.
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
     PM2_APP_NAME  = "MEDICONNECT_API"
-
     NODE_ENV      = "production"
     TERM          = "xterm-256color"
     FORCE_COLOR   = "1"
-    NVM_NODE_MAJOR = "22" // Vite-compatible Node
   }
 
   stages {
-
-    stage('Checkout') {
-      steps {
-        checkout scm
-        sh '''#!/usr/bin/env bash
-set -Eeuo pipefail
-echo "Commit: $(git rev-parse --short HEAD)"
-echo "package.json files (depth<=4):"
-find . -maxdepth 4 -type f -name package.json -print | sort || true
-echo; echo "Listing ${FRONTEND_DIR}:"
-ls -la "${FRONTEND_DIR}" || true
-'''
-      }
-    }
+    stage('Checkout') { steps { checkout scm } }
 
     stage('Install Node (NVM)') {
       steps {
-        sh '''#!/usr/bin/env bash
-set -Eeuo pipefail
-export NVM_DIR="$HOME/.nvm"
-if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-fi
-. "$NVM_DIR/nvm.sh"
-nvm install "${NVM_NODE_MAJOR}"
-nvm use "${NVM_NODE_MAJOR}"
-echo "Using Node: $(node -v)"
-echo "Using npm:  $(npm -v)"
-'''
+        sh '''
+          set -e
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" || (curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && . "$NVM_DIR/nvm.sh")
+          # Vite wants Node 20+. Use 20 LTS locally.
+          nvm install 20 >/dev/null
+          nvm use 20 >/dev/null
+          node -v
+          npm -v
+        '''
       }
     }
 
     stage('Install deps') {
       steps {
-        script {
-          def NVM_SETUP = '''
-set -Eeuo pipefail
-export NVM_DIR="$HOME/.nvm"
-. "$NVM_DIR/nvm.sh"
-nvm use "${NVM_NODE_MAJOR}" >/dev/null
-'''
-
-          // Frontend dev deps (tsc, vite) included
-          sh """#!/usr/bin/env bash
-${NVM_SETUP}
-if [[ -f "\${FRONTEND_DIR}/package.json" ]]; then
-  cd "\${FRONTEND_DIR}"
-  NPM_CONFIG_PRODUCTION=false npm ci --include=dev \
-    || NPM_CONFIG_PRODUCTION=false npm install --no-audit --prefer-offline
-else
-  echo "Skip frontend install: \${FRONTEND_DIR}/package.json not found"
-fi
-"""
-
-          // Backend optional
-          sh """#!/usr/bin/env bash
-${NVM_SETUP}
-if [[ -f "\${BACKEND_DIR}/package.json" ]]; then
-  cd "\${BACKEND_DIR}"
-  npm ci || npm install --no-audit --prefer-offline
-else
-  echo "Skip backend install: \${BACKEND_DIR}/package.json not found"
-fi
-"""
-        }
+        sh '''
+          set -e
+          export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null
+          if [ -f "${FRONTEND_DIR}/package.json" ]; then
+            cd "${FRONTEND_DIR}"
+            NPM_CONFIG_PRODUCTION=false npm ci --include=dev || NPM_CONFIG_PRODUCTION=false npm install
+          fi
+          if [ -f "${BACKEND_DIR}/package.json" ]; then
+            cd "${BACKEND_DIR}"
+            npm ci || npm install
+          fi
+        '''
       }
     }
 
     stage('Lint & Test') {
       steps {
-        script {
-          def NVM_SETUP = '''
-set -Eeuo pipefail
-export NVM_DIR="$HOME/.nvm"
-. "$NVM_DIR/nvm.sh"
-nvm use "${NVM_NODE_MAJOR}" >/dev/null
-'''
-          // Frontend lint (optional)
-          sh """#!/usr/bin/env bash
-${NVM_SETUP}
-if [[ -f "\${FRONTEND_DIR}/package.json" ]]; then
-  cd "\${FRONTEND_DIR}"
-  npm run -s lint || echo "No lint or lint failed (non-blocking)"
-else
-  echo "Skip frontend lint: package.json not found"
-fi
-"""
-
-          // Backend tests (optional)
-          sh """#!/usr/bin/env bash
-${NVM_SETUP}
-if [[ -f "\${BACKEND_DIR}/package.json" ]]; then
-  cd "\${BACKEND_DIR}"
-  npm test || echo "no backend tests"
-else
-  echo "Skip backend tests: package.json not found"
-fi
-"""
-        }
+        sh '''
+          set -e
+          export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null
+          if [ -f "${FRONTEND_DIR}/package.json" ]; then
+            cd "${FRONTEND_DIR}"
+            npm run -s lint || true
+          fi
+          if [ -f "${BACKEND_DIR}/package.json" ]; then
+            cd "${BACKEND_DIR}"
+            npm test || echo "no backend tests"
+          fi
+        '''
       }
     }
 
     stage('Build (frontend)') {
       steps {
-        script {
-          def NVM_SETUP = '''
-set -Eeuo pipefail
-export NVM_DIR="$HOME/.nvm"
-. "$NVM_DIR/nvm.sh"
-nvm use "${NVM_NODE_MAJOR}" >/dev/null
-'''
-          sh """#!/usr/bin/env bash
-${NVM_SETUP}
-if [[ -f "\${FRONTEND_DIR}/package.json" ]]; then
-  cd "\${FRONTEND_DIR}"
-  # Make sure TypeScript is callable if project uses it
-  npx --yes tsc -v >/dev/null 2>&1 || true
-  # Vite/CRA build
-  NPM_CONFIG_PRODUCTION=false npm run build --if-present || npx --yes vite build
-  if [[ ! -d dist && ! -d build ]]; then
-    echo "❌ No dist/ or build/ folder created. Ensure your build script outputs one of these."
-    exit 1
-  fi
-else
-  echo "Skip frontend build: package.json not found"
-  exit 1
-fi
-"""
-        }
+        sh '''
+          set -e
+          export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null
+          cd "${FRONTEND_DIR}"
+          npm run build --if-present || npx --yes vite build
+          test -d dist || { echo "No dist/ folder found after build"; exit 1; }
+        '''
       }
     }
 
     stage('Package (backend)') {
       steps {
-        sh '''#!/usr/bin/env bash
-set -Eeuo pipefail
-if [[ -d "${BACKEND_DIR}" && -f "${BACKEND_DIR}/package.json" ]]; then
-  cd "${BACKEND_DIR}"
-  rm -rf .release && mkdir -p .release
-  cp -r package.json package-lock.json .release/ 2>/dev/null || true
-  if [[ -d dist ]]; then
-    cp -r dist .release/
-  elif [[ -d src ]]; then
-    cp -r src .release/
-  else
-    echo "Backend has neither dist/ nor src/. Adjust packaging as needed."
-  fi
-else
-  echo "Skip backend package: ${BACKEND_DIR}/package.json not found"
-fi
-'''
+        sh '''
+          set -e
+          if [ -f "${BACKEND_DIR}/package.json" ]; then
+            cd "${BACKEND_DIR}"
+            rm -rf .release && mkdir -p .release
+            cp -r package.json package-lock.json .release/ 2>/dev/null || true
+            if [ -d dist ]; then cp -r dist .release/; elif [ -d src ]; then cp -r src .release/; fi
+          fi
+        '''
       }
     }
 
-    stage('Deploy (optional)') {
-      when {
-        allOf {
-          branch 'main'
-          expression { return params.RUN_DEPLOY }
-        }
-      }
+    stage('Deploy (local, optional)') {
+      when { expression { return params.DO_DEPLOY } }
       steps {
-        echo "Deploying Mediconnect on this machine"
+        echo "Deploying locally on this Mac…"
+        sh '''
+          set -e
+          # Detect macOS and choose proper webroot
+          TARGET_WEBROOT="${NGINX_WEBROOT}"
+          case "$(uname -s)" in
+            Darwin)
+              TARGET_WEBROOT="/opt/homebrew/var/www/mediconnect"
+              ;;
+          esac
+          echo "Using webroot: ${TARGET_WEBROOT}"
+          mkdir -p "${TARGET_WEBROOT}"
 
-        // --- Frontend → Nginx (optional/local safe) ---
-        sh '''#!/usr/bin/env bash
-set -Eeuo pipefail
-: "${NGINX_WEBROOT}"
-: "${FRONTEND_DIR}"
+          # Copy frontend build
+          SRC="${FRONTEND_DIR}/dist"
+          rsync -a --delete "${SRC}/" "${TARGET_WEBROOT}/"
 
-if [[ ! -d "${FRONTEND_DIR}/dist" && ! -d "${FRONTEND_DIR}/build" ]]; then
-  echo "Nothing to deploy: no dist/ or build/ under ${FRONTEND_DIR}"
-  exit 1
-fi
+          # Reload nginx (macOS via brew; ignore failure if not installed)
+          if command -v nginx >/dev/null 2>&1; then
+            if command -v brew >/dev/null 2>&1; then
+              nginx -t && brew services restart nginx || true
+            else
+              nginx -t || true
+            fi
+          fi
 
-sudo mkdir -p "${NGINX_WEBROOT}"
-SRC="${FRONTEND_DIR}/dist"
-[[ -d "${FRONTEND_DIR}/build" && ! -d "${FRONTEND_DIR}/dist" ]] && SRC="${FRONTEND_DIR}/build"
+          # Start/restart backend with PM2 (optional)
+          if [ -f "${BACKEND_DIR}/package.json" ]; then
+            export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null
+            cd "${BACKEND_DIR}"
+            if ! command -v pm2 >/dev/null 2>&1; then npm i -g pm2; fi
+            if pm2 list | grep -q "${PM2_APP_NAME}"; then
+              pm2 restart "${PM2_APP_NAME}"
+            else
+              pm2 start "npm run start" --name "${PM2_APP_NAME}"
+            fi
+            pm2 save
+          fi
 
-if [[ -z "${NGINX_WEBROOT}" || "${NGINX_WEBROOT}" = "/" ]]; then
-  echo "Refusing to wipe NGINX_WEBROOT='${NGINX_WEBROOT}'"
-  exit 1
-fi
-[[ -d "${NGINX_WEBROOT}" ]] || { echo "Target does not exist: ${NGINX_WEBROOT}"; exit 1; }
-
-sudo find "${NGINX_WEBROOT}" -mindepth 1 -maxdepth 1 -print -exec sudo rm -rf -- {} +
-sudo cp -r "$SRC"/* "${NGINX_WEBROOT}/"
-
-# Try to reload Nginx on Mac or Linux
-if command -v nginx >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1 && brew services list | grep -q nginx; then
-    nginx -t && brew services restart nginx || true
-  elif command -v systemctl >/dev/null 2>&1; then
-    nginx -t && sudo systemctl reload nginx || true
-  else
-    nginx -t && sudo service nginx reload || true
-  fi
-fi
-'''
-
-        // --- Backend → PM2 (optional) ---
-        script {
-          def NVM_SETUP = '''
-set -Eeuo pipefail
-export NVM_DIR="$HOME/.nvm"
-. "$NVM_DIR/nvm.sh"
-nvm use "${NVM_NODE_MAJOR}" >/dev/null
-'''
-          sh """#!/usr/bin/env bash
-${NVM_SETUP}
-if [[ -f "\${BACKEND_DIR}/package.json" ]]; then
-  cd "\${BACKEND_DIR}"
-  npm ci --omit=dev || npm install --omit=dev
-  if ! command -v pm2 >/dev/null 2>&1; then
-    npm i -g pm2
-  fi
-  if pm2 list | grep -q "${PM2_APP_NAME}"; then
-    pm2 restart "${PM2_APP_NAME}"
-  else
-    pm2 start "npm run start" --name "${PM2_APP_NAME}"
-  fi
-  pm2 save || true
-else
-  echo "Skip backend deploy: \${BACKEND_DIR}/package.json not found"
-fi
-"""
-        }
+          echo "✅ Local deploy complete. Try: http://localhost:8080"
+        '''
       }
     }
-  } // stages
+  }
 
   post {
     success { echo "✅ Build ${env.BUILD_NUMBER} OK on ${env.BRANCH_NAME}" }
     failure { echo "❌ Build ${env.BUILD_NUMBER} FAILED on ${env.BRANCH_NAME}" }
-    always {
-      // Archive built assets (works regardless of exact paths)
-      archiveArtifacts allowEmptyArchive: true, artifacts: "**/dist/**,**/build/**"
-    }
+    always  { archiveArtifacts allowEmptyArchive: true, artifacts: "**/dist/**,**/build/**" }
   }
 }
-
