@@ -19,19 +19,20 @@ pipeline {
     FORCE_COLOR   = "1"
 
     // --- AWS Deploy settings ---
-    AWS_HOST      = "3.22.13.29"     // <-- set to your EC2 Public IP / DNS
+    AWS_HOST      = "3.22.13.29"           // current target
     AWS_USER      = "ubuntu"
-    SSH_CRED_ID   = "ec2-jenkins-ssh"  // <-- Jenkins credentialId (SSH Username w/ Private Key)
+    SSH_CRED_ID   = "ec2-jenkins-ssh"      // Jenkins -> Credentials (SSH private key)
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
     PM2_APP_NAME  = "MEDICONNECT_API"
 
-    // Node version used locally & on EC2 for PM2
+    // Node version for builds & remote PM2 (Vite prefers 20.19+ or 22.12+)
     NODE_MAJOR    = "22"
   }
 
   stages {
-
-    stage('Checkout') { steps { checkout scm } }
+    stage('Checkout') {
+      steps { checkout scm }
+    }
 
     stage('Install Node (NVM)') {
       steps {
@@ -117,26 +118,37 @@ pipeline {
       steps {
         echo "Deploying to ${AWS_USER}@${AWS_HOST}…"
 
-        // --- FRONTEND: upload dist/ and reload nginx ---
-        sshagent (credentials: ["${SSH_CRED_ID}"]) {
+        // Use Jenkins SSH key credentials directly (no sshagent step needed)
+        withCredentials([sshUserPrivateKey(credentialsId: "${SSH_CRED_ID}", keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER_FROM_CREDS')]) {
           sh '''
-            set -e
+            set -euo pipefail
 
-            # Ensure we have a FE build to ship
-            test -d "${FRONTEND_DIR}/dist" || { echo "❌ dist/ not found. Build stage must create it."; exit 1; }
+            # If pipeline was restarted at this stage, ensure FE build exists
+            if [ ! -d "${FRONTEND_DIR}/dist" ]; then
+              echo "ERROR: ${FRONTEND_DIR}/dist not found. Run full pipeline or ensure artifacts are present."
+              exit 2
+            fi
 
-            # Pack FE for faster transfer
+            # Prep key file
+            install -m 600 /dev/null "$SSH_KEY"
+            cat "$SSH_KEY" > "$SSH_KEY" 2>/dev/null || true
+            chmod 600 "$SSH_KEY"
+
+            # Create tar to transfer (faster & preserves perms)
             tar -C "${FRONTEND_DIR}/dist" -czf frontend.tgz .
 
-            # Upload (rsync if available; fallback to scp)
+            # Known hosts: accept-new to avoid prompts
+            SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+
+            # Copy artifact
             if command -v rsync >/dev/null 2>&1; then
-              rsync -avz -e "ssh -o StrictHostKeyChecking=accept-new" frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
+              rsync -avz -e "ssh $SSH_OPTS" frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
             else
-              scp -o StrictHostKeyChecking=accept-new frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
+              scp $SSH_OPTS frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
             fi
 
             # Remote: unpack to NGINX webroot & reload nginx
-            ssh -o StrictHostKeyChecking=accept-new ${AWS_USER}@${AWS_HOST} bash -lc "
+            ssh $SSH_OPTS ${AWS_USER}@${AWS_HOST} bash -lc "
               set -euo pipefail
               sudo mkdir -p '${NGINX_WEBROOT}'
               sudo rm -rf '${NGINX_WEBROOT:?}'/*
@@ -147,32 +159,33 @@ pipeline {
                 sudo nginx -t && sudo systemctl reload nginx || true
               fi
             "
+
+            rm -f frontend.tgz
           '''
-        }
 
-        // --- BACKEND (optional): push package and (re)start via PM2 ---
-        script {
-          if (fileExists("${BACKEND_DIR}/package.json")) {
-            sshagent (credentials: ["${SSH_CRED_ID}"]) {
+          // OPTIONAL backend deploy via PM2
+          script {
+            if (fileExists("${BACKEND_DIR}/package.json")) {
               sh '''
-                set -e
+                set -euo pipefail
 
-                # Prepare minimal backend tarball
+                SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+
+                # Bundle minimal backend payload
                 rm -f backend.tgz
-                INCLUDE_DIRS=""
-                [ -d "${BACKEND_DIR}/dist" ] && INCLUDE_DIRS="${INCLUDE_DIRS} dist"
-                [ -d "${BACKEND_DIR}/src" ]  && INCLUDE_DIRS="${INCLUDE_DIRS} src"
-                tar -C "${BACKEND_DIR}" -czf backend.tgz package.json package-lock.json ${INCLUDE_DIRS}
+                tar -C "${BACKEND_DIR}" -czf backend.tgz \
+                  package.json package-lock.json \
+                  $( [ -d "${BACKEND_DIR}/dist" ] && echo "dist" ) \
+                  $( [ -d "${BACKEND_DIR}/src" ] && echo "src" )
 
                 # Upload
-                scp -o StrictHostKeyChecking=accept-new backend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/backend.tgz
+                scp $SSH_OPTS backend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/backend.tgz
 
-                # Remote: ensure Node via NVM, install deps, run with PM2
-                ssh -o StrictHostKeyChecking=accept-new ${AWS_USER}@${AWS_HOST} bash -lc "
+                # Remote install & (re)start with PM2
+                ssh $SSH_OPTS ${AWS_USER}@${AWS_HOST} bash -lc "
                   set -euo pipefail
-                  APP_DIR=\\\"$HOME/apps/mediconnect-backend\\\"
-                  mkdir -p \\\"$APP_DIR\\\"
-                  tar -C \\\"$APP_DIR\\\" -xzf /tmp/backend.tgz
+                  mkdir -p ~/apps/mediconnect-backend
+                  tar -C ~/apps/mediconnect-backend -xzf /tmp/backend.tgz
                   rm -f /tmp/backend.tgz
 
                   export NVM_DIR=\\\"$HOME/.nvm\\\"
@@ -182,7 +195,7 @@ pipeline {
                   nvm use ${NODE_MAJOR} >/dev/null
                   command -v npm >/dev/null 2>&1 || nvm install-latest-npm
 
-                  cd \\\"$APP_DIR\\\"
+                  cd ~/apps/mediconnect-backend
                   npm ci --omit=dev || npm install --omit=dev
 
                   if ! command -v pm2 >/dev/null 2>&1; then
@@ -196,14 +209,14 @@ pipeline {
                   fi
                   pm2 save || true
                 "
+
+                rm -f backend.tgz
               '''
+            } else {
+              echo "Skipping backend deploy: ${BACKEND_DIR}/package.json not found."
             }
-          } else {
-            echo "Skipping backend deploy: ${BACKEND_DIR}/package.json not found."
           }
         }
-
-        echo "✅ Deployment to ${AWS_HOST} finished."
       }
     }
   } // stages
