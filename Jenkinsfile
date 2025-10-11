@@ -19,7 +19,7 @@ pipeline {
     FORCE_COLOR   = "1"
 
     // --- AWS Deploy settings ---
-    AWS_HOST      = "3.145.13.178"     // <-- set to your EC2 Public IP / DNS
+    AWS_HOST      = "3.22.13.29"     // <-- set to your EC2 Public IP / DNS
     AWS_USER      = "ubuntu"
     SSH_CRED_ID   = "ec2-jenkins-ssh"  // <-- Jenkins credentialId (SSH Username w/ Private Key)
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
