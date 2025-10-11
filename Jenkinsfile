@@ -26,7 +26,7 @@ pipeline {
 
     AWS_HOST      = "3.22.13.29"
     AWS_USER      = "ubuntu"
-    SSH_CRED_ID   = "ec2-jenkins-ssh" // informational only; we use params.EC2_SSH_KEY
+    SSH_CRED_ID   = "ec2-jenkins-ssh"
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
     PM2_APP_NAME  = "MEDICONNECT_API"
 
@@ -34,7 +34,11 @@ pipeline {
   }
 
   stages {
-    stage('Checkout') { steps { checkout scm } }
+    stage('Checkout') { 
+      steps { 
+        checkout scm 
+      } 
+    }
 
     stage('Install Node (NVM)') {
       steps {
@@ -116,66 +120,6 @@ if [ -f "${BACKEND_DIR}/package.json" ]; then
   fi
 fi'
 '''
-      }
-    }
-
-    stage('Deploy to AWS') {
-      when { expression { return params.DO_DEPLOY } }
-      steps {
-        echo "Deploying to ${AWS_USER}@${AWS_HOST}…"
-
-        withCredentials([sshUserPrivateKey(credentialsId: params.EC2_SSH_KEY, keyFileVariable: 'SSH_KEY')]) {
-          sh '''
-bash -lc 'set -euo pipefail
-
-if [ ! -d "${FRONTEND_DIR}/dist" ]; then
-  echo "ERROR: ${FRONTEND_DIR}/dist not found. Run full pipeline first."
-  exit 2
-fi
-
-tar -C "${FRONTEND_DIR}/dist" -czf frontend.tgz .
-mkdir -p "$HOME/.ssh"
-touch "$HOME/.ssh/known_hosts"
-
-SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
-
-if command -v rsync >/dev/null 2>&1; then
-  rsync -avz -e "ssh $SSH_OPTS" frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
-else
-  scp $SSH_OPTS frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
-fi
-
-# IMPORTANT: single-line, no leading newline
-ssh $SSH_OPTS ${AWS_USER}@${AWS_HOST} "bash -lc \"set -euo pipefail; sudo mkdir -p \\\"${NGINX_WEBROOT}\\\"; sudo rm -rf \\\"${NGINX_WEBROOT}\\\"/*; sudo tar -C \\\"${NGINX_WEBROOT}\\\" -xzf /tmp/frontend.tgz; rm -f /tmp/frontend.tgz; if command -v nginx >/dev/null 2>&1; then sudo nginx -t && sudo systemctl reload nginx || true; fi\""
-
-rm -f frontend.tgz'
-'''
-          script {
-            if (fileExists("${BACKEND_DIR}/package.json")) {
-              sh '''
-bash -lc 'set -euo pipefail
-mkdir -p "$HOME/.ssh"
-touch "$HOME/.ssh/known_hosts"
-SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
-
-rm -f backend.tgz
-tar -C "${BACKEND_DIR}" -czf backend.tgz \
-  package.json package-lock.json \
-  $( [ -d "${BACKEND_DIR}/dist" ] && echo "dist" ) \
-  $( [ -d "${BACKEND_DIR}/src" ] && echo "src" )
-
-scp $SSH_OPTS backend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/backend.tgz
-
-# IMPORTANT: single-line, no leading newline
-ssh $SSH_OPTS ${AWS_USER}@${AWS_HOST} "bash -lc \"set -euo pipefail; mkdir -p \\$HOME/apps/mediconnect-backend; tar -C \\$HOME/apps/mediconnect-backend -xzf /tmp/backend.tgz; rm -f /tmp/backend.tgz; export NVM_DIR=\\\"\\$HOME/.nvm\\\"; [ -s \\\"\\$NVM_DIR/nvm.sh\\\" ] || curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash; . \\\"\\$NVM_DIR/nvm.sh\\\"; nvm install ${NODE_MAJOR} >/dev/null; nvm use ${NODE_MAJOR} >/dev/null; command -v npm >/dev/null 2>&1 || nvm install-latest-npm; cd \\$HOME/apps/mediconnect-backend; npm ci --omit=dev || npm install --omit=dev; command -v pm2 >/dev/null 2>&1 || npm i -g pm2; if pm2 list | grep -q \\\"${PM2_APP_NAME}\\\"; then pm2 restart \\\"${PM2_APP_NAME}\\\"; else pm2 start \\\"npm run start\\\" --name \\\"${PM2_APP_NAME}\\\"; fi; pm2 save || true\""
-
-rm -f backend.tgz'
-'''
-            } else {
-              echo "Skipping backend deploy: ${BACKEND_DIR}/package.json not found."
-            }
-          }
-        }
       }
     }
   }
