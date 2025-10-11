@@ -19,14 +19,13 @@ pipeline {
     FORCE_COLOR   = "1"
 
     // --- AWS Deploy settings ---
-    // set your EC2 host (public IP or DNS)
-    AWS_HOST      = "3.145.13.178"          // <-- CHANGE THIS
+    AWS_HOST      = "3.145.13.178"     // <-- set to your EC2 Public IP / DNS
     AWS_USER      = "ubuntu"
-    SSH_CRED_ID   = "ec2-jenkins-ssh"       // <-- Jenkins credentialsId (SSH private key)
+    SSH_CRED_ID   = "ec2-jenkins-ssh"  // <-- Jenkins credentialId (SSH Username w/ Private Key)
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
     PM2_APP_NAME  = "MEDICONNECT_API"
 
-    // Node version for builds & remote PM2 (Vite prefers 20.19+ or 22.12+)
+    // Node version used locally & on EC2 for PM2
     NODE_MAJOR    = "22"
   }
 
@@ -118,72 +117,64 @@ pipeline {
       steps {
         echo "Deploying to ${AWS_USER}@${AWS_HOST}…"
 
-        // Upload FE build to EC2
+        // --- FRONTEND: upload dist/ and reload nginx ---
         sshagent (credentials: ["${SSH_CRED_ID}"]) {
           sh '''
             set -e
-            # Create a tar to transfer (faster and preserves perms)
+
+            # Ensure we have a FE build to ship
+            test -d "${FRONTEND_DIR}/dist" || { echo "❌ dist/ not found. Build stage must create it."; exit 1; }
+
+            # Pack FE for faster transfer
             tar -C "${FRONTEND_DIR}/dist" -czf frontend.tgz .
 
-            # Copy artifact up (try rsync, fallback to scp)
+            # Upload (rsync if available; fallback to scp)
             if command -v rsync >/dev/null 2>&1; then
-              rsync -avz -e "ssh -o StrictHostKeyChecking=no" frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
+              rsync -avz -e "ssh -o StrictHostKeyChecking=accept-new" frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
             else
-              scp -o StrictHostKeyChecking=no frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
+              scp -o StrictHostKeyChecking=accept-new frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
             fi
 
-            # Remote commands: unpack to NGINX webroot, reload nginx; PM2 for backend if present
-            ssh -o StrictHostKeyChecking=no ${AWS_USER}@${AWS_HOST} bash -lc "
+            # Remote: unpack to NGINX webroot & reload nginx
+            ssh -o StrictHostKeyChecking=accept-new ${AWS_USER}@${AWS_HOST} bash -lc "
               set -euo pipefail
-
-              # Prepare webroot
               sudo mkdir -p '${NGINX_WEBROOT}'
               sudo rm -rf '${NGINX_WEBROOT:?}'/*
-
-              # Unpack FE
               sudo tar -C '${NGINX_WEBROOT}' -xzf /tmp/frontend.tgz
               rm -f /tmp/frontend.tgz
 
-              # Reload nginx if installed
               if command -v nginx >/dev/null 2>&1; then
                 sudo nginx -t && sudo systemctl reload nginx || true
-              fi
-
-              # OPTIONAL: Backend via PM2 if repo has Backend/package.json
-              if [ -d '~/app/mediconnect-backend' ]; then
-                true
               fi
             "
           '''
         }
 
-        // OPTIONAL: deploy backend code & start with PM2
-        // Push only if BACKEND_DIR exists and has package.json
+        // --- BACKEND (optional): push package and (re)start via PM2 ---
         script {
           if (fileExists("${BACKEND_DIR}/package.json")) {
             sshagent (credentials: ["${SSH_CRED_ID}"]) {
               sh '''
                 set -e
-                export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh" || true
 
-                # Bundle minimal backend payload
+                # Prepare minimal backend tarball
                 rm -f backend.tgz
-                tar -C "${BACKEND_DIR}" -czf backend.tgz \
-                  package.json package-lock.json \
-                  $( [ -d "${BACKEND_DIR}/dist" ] && echo "dist" ) \
-                  $( [ -d "${BACKEND_DIR}/src" ] && echo "src" )
+                INCLUDE_DIRS=""
+                [ -d "${BACKEND_DIR}/dist" ] && INCLUDE_DIRS="${INCLUDE_DIRS} dist"
+                [ -d "${BACKEND_DIR}/src" ]  && INCLUDE_DIRS="${INCLUDE_DIRS} src"
+                tar -C "${BACKEND_DIR}" -czf backend.tgz package.json package-lock.json ${INCLUDE_DIRS}
 
                 # Upload
-                scp -o StrictHostKeyChecking=no backend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/backend.tgz
+                scp -o StrictHostKeyChecking=accept-new backend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/backend.tgz
 
-                # Remote: install & (re)start with PM2
-                ssh -o StrictHostKeyChecking=no ${AWS_USER}@${AWS_HOST} bash -lc "
+                # Remote: ensure Node via NVM, install deps, run with PM2
+                ssh -o StrictHostKeyChecking=accept-new ${AWS_USER}@${AWS_HOST} bash -lc "
                   set -euo pipefail
-                  mkdir -p ~/apps/mediconnect-backend
-                  tar -C ~/apps/mediconnect-backend -xzf /tmp/backend.tgz
+                  APP_DIR=\\\"$HOME/apps/mediconnect-backend\\\"
+                  mkdir -p \\\"$APP_DIR\\\"
+                  tar -C \\\"$APP_DIR\\\" -xzf /tmp/backend.tgz
                   rm -f /tmp/backend.tgz
 
-                  # Ensure NVM/Node
                   export NVM_DIR=\\\"$HOME/.nvm\\\"
                   [ -s \\\"$NVM_DIR/nvm.sh\\\" ] || curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
                   . \\\"$NVM_DIR/nvm.sh\\\"
@@ -191,7 +182,7 @@ pipeline {
                   nvm use ${NODE_MAJOR} >/dev/null
                   command -v npm >/dev/null 2>&1 || nvm install-latest-npm
 
-                  cd ~/apps/mediconnect-backend
+                  cd \\\"$APP_DIR\\\"
                   npm ci --omit=dev || npm install --omit=dev
 
                   if ! command -v pm2 >/dev/null 2>&1; then
@@ -211,6 +202,8 @@ pipeline {
             echo "Skipping backend deploy: ${BACKEND_DIR}/package.json not found."
           }
         }
+
+        echo "✅ Deployment to ${AWS_HOST} finished."
       }
     }
   } // stages
