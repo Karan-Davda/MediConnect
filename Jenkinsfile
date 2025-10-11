@@ -9,6 +9,10 @@ pipeline {
 
   parameters {
     booleanParam(name: 'DO_DEPLOY', defaultValue: true, description: 'Deploy to AWS EC2 after build?')
+    credentials(name: 'EC2_SSH_KEY',
+      defaultValue: 'ec2-jenkins-ssh',
+      description: 'SSH private key for ubuntu@EC2',
+      credentialType: 'com.cloudbees.plugins.credentials.impl.BasicSSHUserPrivateKey')
   }
 
   environment {
@@ -18,21 +22,18 @@ pipeline {
     TERM          = "xterm-256color"
     FORCE_COLOR   = "1"
 
-    // --- AWS Deploy settings ---
-    AWS_HOST      = "3.22.13.29"           // current target
+    AWS_HOST      = "3.22.13.29"
     AWS_USER      = "ubuntu"
-    SSH_CRED_ID   = "ec2-jenkins-ssh"      // Jenkins -> Credentials (SSH private key)
+    // keep for readability, but we’ll actually use params.EC2_SSH_KEY in withCredentials
+    SSH_CRED_ID   = "ec2-jenkins-ssh"
     NGINX_WEBROOT = "/var/www/MEDICONNECT_FRONTEND"
     PM2_APP_NAME  = "MEDICONNECT_API"
 
-    // Node version for builds & remote PM2 (Vite prefers 20.19+ or 22.12+)
     NODE_MAJOR    = "22"
   }
 
   stages {
-    stage('Checkout') {
-      steps { checkout scm }
-    }
+    stage('Checkout') { steps { checkout scm } }
 
     stage('Install Node (NVM)') {
       steps {
@@ -118,43 +119,30 @@ pipeline {
       steps {
         echo "Deploying to ${AWS_USER}@${AWS_HOST}…"
 
-        // Use Jenkins SSH key credentials directly (no sshagent step needed)
-        withCredentials([sshUserPrivateKey(credentialsId: "${SSH_CRED_ID}", keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER_FROM_CREDS')]) {
+        withCredentials([sshUserPrivateKey(credentialsId: params.EC2_SSH_KEY, keyFileVariable: 'SSH_KEY')]) {
           sh '''
             set -euo pipefail
 
-            # If pipeline was restarted at this stage, ensure FE build exists
             if [ ! -d "${FRONTEND_DIR}/dist" ]; then
-              echo "ERROR: ${FRONTEND_DIR}/dist not found. Run full pipeline or ensure artifacts are present."
+              echo "ERROR: ${FRONTEND_DIR}/dist not found. Run full pipeline first."
               exit 2
             fi
 
-            # Prep key file
-            install -m 600 /dev/null "$SSH_KEY"
-            cat "$SSH_KEY" > "$SSH_KEY" 2>/dev/null || true
-            chmod 600 "$SSH_KEY"
-
-            # Create tar to transfer (faster & preserves perms)
             tar -C "${FRONTEND_DIR}/dist" -czf frontend.tgz .
-
-            # Known hosts: accept-new to avoid prompts
             SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
 
-            # Copy artifact
             if command -v rsync >/dev/null 2>&1; then
               rsync -avz -e "ssh $SSH_OPTS" frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
             else
               scp $SSH_OPTS frontend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/frontend.tgz
             fi
 
-            # Remote: unpack to NGINX webroot & reload nginx
             ssh $SSH_OPTS ${AWS_USER}@${AWS_HOST} bash -lc "
               set -euo pipefail
               sudo mkdir -p '${NGINX_WEBROOT}'
               sudo rm -rf '${NGINX_WEBROOT:?}'/*
               sudo tar -C '${NGINX_WEBROOT}' -xzf /tmp/frontend.tgz
               rm -f /tmp/frontend.tgz
-
               if command -v nginx >/dev/null 2>&1; then
                 sudo nginx -t && sudo systemctl reload nginx || true
               fi
@@ -163,25 +151,20 @@ pipeline {
             rm -f frontend.tgz
           '''
 
-          // OPTIONAL backend deploy via PM2
           script {
             if (fileExists("${BACKEND_DIR}/package.json")) {
               sh '''
                 set -euo pipefail
-
                 SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
 
-                # Bundle minimal backend payload
                 rm -f backend.tgz
                 tar -C "${BACKEND_DIR}" -czf backend.tgz \
                   package.json package-lock.json \
                   $( [ -d "${BACKEND_DIR}/dist" ] && echo "dist" ) \
                   $( [ -d "${BACKEND_DIR}/src" ] && echo "src" )
 
-                # Upload
                 scp $SSH_OPTS backend.tgz ${AWS_USER}@${AWS_HOST}:/tmp/backend.tgz
 
-                # Remote install & (re)start with PM2
                 ssh $SSH_OPTS ${AWS_USER}@${AWS_HOST} bash -lc "
                   set -euo pipefail
                   mkdir -p ~/apps/mediconnect-backend
@@ -219,7 +202,7 @@ pipeline {
         }
       }
     }
-  } // stages
+  }
 
   post {
     success { echo "✅ Build ${env.BUILD_NUMBER} OK on ${env.BRANCH_NAME}" }
