@@ -1,209 +1,212 @@
 pipeline {
   agent any
-
-  // If you have a NodeJS tool configured in Jenkins (Manage Jenkins → Global Tool Configuration),
-  // set its name here. Otherwise comment 'tools' and it will still work using system node.
-  tools { nodejs 'NodeJS-22' }
+  options { timestamps() }
 
   environment {
-    // ---- Servers ----
-    DEV_SERVER  = '3.22.13.29'     // <- put your dev IP/DNS
-    QA_SERVER   = '3.145.13.178'   // <- put your QA IP/DNS
-    PROD_SERVER = '3.22.13.29'     // <- put your prod IP/DNS (same as current single box ok)
+    // --- repo layout ---
+    FRONTEND_DIR = 'Frontend/web'
+    BACKEND_DIR  = 'Backend'
 
-    // ---- Jenkins Credentials (SSH private keys) ----
-    DEV_SSH_CRED  = 'ec2-jenkins-ssh' // change if you use different creds per env
-    QA_SSH_CRED   = 'ec2-jenkins-ssh'
-    PROD_SSH_CRED = 'ec2-jenkins-ssh'
+    // --- deploy target (Nginx serves this) ---
+    APP_DIR  = '/var/www/mediconnect'
 
-    // ---- App layout ----
-    FRONTEND_DIR  = 'Frontend/web'
-    BACKEND_DIR   = 'Backend'
-    NGINX_WEBROOT = '/var/www/MEDICONNECT_FRONTEND'
-    PM2_APP_NAME  = 'MEDICONNECT_API'
-
-    // Remote user
-    REMOTE_USER   = 'ubuntu'
-
-    // Node version used on remote for PM2/runtime
-    NODE_MAJOR    = '22'
+    // --- EC2 SSH for deploy ---
+    EC2_HOST = 'ec2-3-22-13-29.us-east-2.compute.amazonaws.com'
+    SSH_USER = 'ubuntu'
+    EC2_CRED = 'aws-deploy-key'  // your Jenkins credential ID
   }
 
   stages {
     stage('Checkout') {
       steps {
-        checkout scm
-        script {
-          env.GIT_COMMIT_SHORT = sh(
-            script: "git rev-parse --short HEAD",
-            returnStdout: true
-          ).trim()
-        }
+        sh '''
+          git rev-parse --short HEAD > .git/short
+          cat .git/short
+        '''
       }
     }
 
-    stage('Install Dependencies') {
+    stage('Install Node (NVM)') {
       steps {
-        // install root tools if any (safe no-op), then FE + BE
-        sh """
-          set -e
-          if [ -f '${FRONTEND_DIR}/package.json' ]; then
-            cd '${FRONTEND_DIR}'
-            NPM_CONFIG_PRODUCTION=false npm ci --include=dev || NPM_CONFIG_PRODUCTION=false npm install
+        sh '''
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          export NVM_DIR="$HOME/.nvm"
+          if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
           fi
-          if [ -f '${BACKEND_DIR}/package.json' ]; then
-            cd '${BACKEND_DIR}'
+          source "$NVM_DIR/nvm.sh"
+          nvm install 20 >/dev/null
+          nvm use 20 >/dev/null
+
+          node -v
+          npm -v
+        '''
+      }
+    }
+
+    stage('Install deps') {
+      steps {
+        sh '''
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          # Frontend deps
+          if [ -f "$FRONTEND_DIR/package.json" ]; then
+            pushd "$FRONTEND_DIR" >/dev/null
             npm ci || npm install
-          fi
-        """
-      }
-    }
-
-    stage('Build Frontend') {
-      steps {
-        sh """
-          set -e
-          cd '${FRONTEND_DIR}'
-          npm run build --if-present || npx --yes vite build
-          test -d dist || { echo 'No dist/ folder found after build'; exit 1; }
-        """
-      }
-    }
-
-    stage('Package Backend') {
-      steps {
-        sh """
-          set -e
-          if [ -f '${BACKEND_DIR}/package.json' ]; then
-            cd '${BACKEND_DIR}'
-            rm -f ../backend.tgz
-            # include package files and either dist/ or src/
-            tar -czf ../backend.tgz \\
-              package.json package-lock.json \\
-              \$( [ -d dist ] && echo 'dist' ) \\
-              \$( [ -d src ]  && echo 'src' )
+            popd >/dev/null
           else
-            echo 'No backend/package.json — skipping backend package'
+            echo "::warning::No $FRONTEND_DIR/package.json — skipping FE deps"
           fi
-        """
+
+          # Backend deps (optional)
+          if [ -f "$BACKEND_DIR/package.json" ]; then
+            pushd "$BACKEND_DIR" >/dev/null
+            npm ci || npm install
+            popd >/dev/null
+          else
+            echo "::notice::No $BACKEND_DIR/package.json — skipping BE deps"
+          fi
+        '''
       }
     }
 
-    // ---------- Deploy lanes (branch-based) ----------
-    stage('Deploy to Development') {
-      when { branch 'staging' }
+    stage('Lint & Test') {
       steps {
-        script {
-          deployToEnvironment('dev', env.DEV_SERVER, env.DEV_SSH_CRED)
-        }
+        sh '''
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          # Frontend lint/test
+          if [ -f "$FRONTEND_DIR/package.json" ]; then
+            pushd "$FRONTEND_DIR" >/dev/null
+            npm run lint --if-present
+            npm test --if-present
+            popd >/dev/null
+          fi
+
+          # Backend lint/test
+          if [ -f "$BACKEND_DIR/package.json" ]; then
+            pushd "$BACKEND_DIR" >/dev/null
+            npm run lint --if-present
+            npm test --if-present
+            popd >/dev/null
+          fi
+        '''
       }
     }
 
-    stage('Deploy to QA') {
-      when { branch 'QA' }
+    stage('Build (frontend)') {
       steps {
-        script {
-          deployToEnvironment('qa', env.QA_SERVER, env.QA_SSH_CRED)
-        }
+        sh '''
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          test -d "$FRONTEND_DIR" || { echo "::error::$FRONTEND_DIR not found"; exit 1; }
+
+          pushd "$FRONTEND_DIR" >/dev/null
+          npm run build
+          test -d dist || { echo "::error::No dist/ folder found"; exit 1; }
+          echo "BUILD_OUT=$(pwd)/dist" > "$WORKSPACE/build_out.env"
+          popd >/dev/null
+        '''
       }
     }
 
-    stage('Production Approval') {
+    stage('Package (backend)') {
+      steps {
+        sh '''
+          #!/usr/bin/env bash
+          set -euo pipefail
+          rm -f backend.tgz || true
+
+          if [ -f "$BACKEND_DIR/package.json" ]; then
+            pushd "$BACKEND_DIR" >/dev/null
+            tar -czf "$WORKSPACE/backend.tgz" \
+              package.json package-lock.json \
+              $( [ -d dist ] && echo dist ) \
+              $( [ -d src ]  && echo src ) || true
+            popd >/dev/null
+            ls -lh backend.tgz || true
+          else
+            echo "::notice::Skipping backend package (no $BACKEND_DIR/package.json)"
+          fi
+        '''
+      }
+    }
+
+    stage('Deploy to Dev Env - AWS EC2') {
       when { branch 'main' }
       steps {
-        input message: "Deploy ${env.GIT_COMMIT_SHORT} to Production?", ok: 'Deploy'
-      }
-    }
+        withCredentials([sshUserPrivateKey(credentialsId: env.EC2_CRED, keyFileVariable: 'KEYFILE')]) {
+          sh '''
+            #!/usr/bin/env bash
+            set -euo pipefail
 
-    stage('Deploy to Production') {
-      when { branch 'main' }
-      steps {
-        script {
-          deployToEnvironment('prod', env.PROD_SERVER, env.PROD_SSH_CRED)
+            source "$WORKSPACE/build_out.env"
+
+            # Compress dist folder
+            rm -f mediconnect-dist.zip mediconnect-dist.tar.gz || true
+            if command -v zip >/dev/null 2>&1; then
+              (cd "$BUILD_OUT" && zip -r "$WORKSPACE/mediconnect-dist.zip" .)
+              ART="mediconnect-dist.zip"
+            else
+              (cd "$BUILD_OUT" && tar -czf "$WORKSPACE/mediconnect-dist.tar.gz" .)
+              ART="mediconnect-dist.tar.gz"
+            fi
+
+            ls -lh "$WORKSPACE/$ART"
+
+            # Upload artifact
+            scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/$ART" ${SSH_USER}@${EC2_HOST}:/tmp/$ART
+
+            # Deploy remotely
+            ssh -i "$KEYFILE" -o StrictHostKeyChecking=no ${SSH_USER}@${EC2_HOST} 'bash -lc "
+              set -e
+              sudo apt-get update -y >/dev/null 2>&1 || true
+              sudo apt-get install -y unzip >/dev/null 2>&1 || true
+
+              sudo rm -rf '${APP_DIR}.new'
+              sudo mkdir -p '${APP_DIR}.new'
+              sudo chown -R appuser:appuser '${APP_DIR}.new'
+
+              sudo -u appuser bash -lc \"
+                cd '${APP_DIR}.new'
+                if [ -f /tmp/mediconnect-dist.zip ]; then
+                  unzip -q /tmp/mediconnect-dist.zip
+                else
+                  tar -xzf /tmp/mediconnect-dist.tar.gz
+                fi
+              \"
+
+              if [ -d '${APP_DIR}' ]; then
+                sudo mv '${APP_DIR}' '${APP_DIR}.bak.$(date +%s)'
+              fi
+              sudo mv '${APP_DIR}.new' '${APP_DIR}'
+
+              sudo systemctl reload nginx || true
+              rm -f /tmp/mediconnect-dist.zip /tmp/mediconnect-dist.tar.gz || true
+              echo '✅ Deployed static frontend to ${APP_DIR}'
+            "'
+          '''
         }
       }
     }
   }
 
   post {
-    success { echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed OK" }
-    failure { echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed" }
-    always  { archiveArtifacts allowEmptyArchive: true, artifacts: "**/dist/**,backend.tgz" }
+    success {
+      script {
+        def short = readFile('.git/short').trim()
+        echo "✅ ${env.BRANCH_NAME}@${short} succeeded"
+      }
+    }
+    always {
+      archiveArtifacts artifacts: 'build_out.env,backend.tgz,**/dist/**', allowEmptyArchive: true
+      echo "Build URL: ${env.BUILD_URL}"
+    }
   }
 }
 
-// ---------------- helper ----------------
-def deployToEnvironment(String envName, String server, String credId) {
-  // Ship FE dist and optional backend bundle; restart nginx + pm2 remotely
-  sshagent([credId]) {
-    sh """
-      set -e
-
-      # Prep artifacts
-      rm -f frontend.tgz || true
-      tar -C '${env.FRONTEND_DIR}/dist' -czf frontend.tgz .
-
-      # Known hosts file so StrictHostKeyChecking works
-      mkdir -p "\$HOME/.ssh"
-      touch "\$HOME/.ssh/known_hosts"
-
-      SSH_OPTS="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=\$HOME/.ssh/known_hosts"
-
-      echo "==> Uploading frontend to ${server}"
-      rsync -avz -e "ssh \$SSH_OPTS" frontend.tgz ${env.REMOTE_USER}@${server}:/tmp/frontend.tgz
-
-      if [ -f 'backend.tgz' ]; then
-        echo "==> Uploading backend to ${server}"
-        rsync -avz -e "ssh \$SSH_OPTS" backend.tgz ${env.REMOTE_USER}@${server}:/tmp/backend.tgz
-      fi
-
-      echo "==> Applying on remote ${server}"
-      ssh \$SSH_OPTS ${env.REMOTE_USER}@${server} "bash -lc '
-        set -e
-
-        # --- Frontend ---
-        sudo mkdir -p \"${env.NGINX_WEBROOT}\"
-        sudo rm -rf \"${env.NGINX_WEBROOT}\"/*
-        sudo tar -C \"${env.NGINX_WEBROOT}\" -xzf /tmp/frontend.tgz
-        rm -f /tmp/frontend.tgz
-
-        if command -v nginx >/dev/null 2>&1; then
-          sudo nginx -t && sudo systemctl reload nginx || true
-        fi
-
-        # --- Backend (optional) ---
-        if [ -f /tmp/backend.tgz ]; then
-          mkdir -p \$HOME/apps/mediconnect-backend
-          tar -C \$HOME/apps/mediconnect-backend -xzf /tmp/backend.tgz
-          rm -f /tmp/backend.tgz
-
-          # Ensure Node + npm via NVM for runtime
-          export NVM_DIR=\"\$HOME/.nvm\"
-          [ -s \"\$NVM_DIR/nvm.sh\" ] || curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-          . \"\$NVM_DIR/nvm.sh\"
-          nvm install ${env.NODE_MAJOR} >/dev/null
-          nvm use ${env.NODE_MAJOR} >/dev/null
-          command -v npm >/dev/null 2>&1 || nvm install-latest-npm
-
-          cd \$HOME/apps/mediconnect-backend
-          npm ci --omit=dev || npm install --omit=dev
-
-          # PM2 ensure + (re)start
-          command -v pm2 >/dev/null 2>&1 || npm i -g pm2
-          if pm2 list | grep -q \"${env.PM2_APP_NAME}\"; then
-            pm2 restart \"${env.PM2_APP_NAME}\"
-          else
-            pm2 start \"npm run start\" --name \"${env.PM2_APP_NAME}\"
-          fi
-          pm2 save || true
-        fi
-
-        echo \"Remote deploy finished: ${envName}\"
-      '"
-
-      echo "==> Cleaning local artifacts"
-      rm -f frontend.tgz || true
-      # keep backend.tgz archived by post { always }, so no rm here
-    """
-  }
-}
