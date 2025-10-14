@@ -110,8 +110,7 @@ fi
   } // deploy only from main
   steps {
     withCredentials([sshUserPrivateKey(credentialsId: env.EC2_CRED, keyFileVariable: 'KEYFILE')]) {
-      sh ''
-      '#!/bin/bash
+      sh ''' #!/bin/bash
       set - euo pipefail
 
       source "$WORKSPACE/build_out.env"
@@ -181,8 +180,7 @@ fi
 
       echo "✅ Deployed static frontend to $APP_DIR"
       REMOTE
-        ''
-      '
+        '''
     }
   }
 }
