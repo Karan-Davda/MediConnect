@@ -184,7 +184,7 @@ fi
       }
     }
 
-    stage('Deploy (optional)') {
+    stage('Deploy') {
       when {
         allOf {
           branch 'main'

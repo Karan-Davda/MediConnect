@@ -5,7 +5,13 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "install:frontend": "cd Frontend/web && npm install",
+    "install:backend": "cd Backend && npm install",
+    "install:all": "npm run install:frontend && npm run install:backend",
+    "build:frontend": "cd Frontend/web && npm run build",
+    "dev:frontend": "cd Frontend/web && npm run dev",
+    "lint:frontend": "cd Frontend/web && npm run lint"
   },
   "keywords": [],
   "author": "",
@@ -17,5 +23,9 @@
   "bugs": {
     "url": "https://github.com/Karan-Davda/MediConnect/issues"
   },
-  "homepage": "https://github.com/Karan-Davda/MediConnect#readme"
+  "homepage": "https://github.com/Karan-Davda/MediConnect#readme",
+  "workspaces": [
+    "Frontend/*",
+    "Backend/*"
+  ]
 }
