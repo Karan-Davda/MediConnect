@@ -104,104 +104,88 @@ fi
       }
     }
 
-    stage('Build (frontend)') {
-      steps {
-        sh '''#!/bin/bash
-set -euo pipefail
+  stage('Deploy to Dev Env - AWS EC2') {
+  when {
+    branch 'main'
+  } // deploy only from main
+  steps {
+    withCredentials([sshUserPrivateKey(credentialsId: env.EC2_CRED, keyFileVariable: 'KEYFILE')]) {
+      sh ''
+      '#!/bin/bash
+      set - euo pipefail
 
-# load Node 20 for this step
-export NVM_DIR="$HOME/.nvm"
-source "$NVM_DIR/nvm.sh"
-nvm use 20 >/dev/null
+      source "$WORKSPACE/build_out.env"
 
-test -d "$FRONTEND_DIR" || { echo "::error::$FRONTEND_DIR not found"; exit 1; }
+      # Prepare a single archive to upload
+      rm - f mediconnect - dist.zip mediconnect - dist.tar.gz || true
+      if command - v zip > /dev/null
+      2 > & 1;
+      then
+        (cd "$BUILD_OUT" && zip - r "$WORKSPACE/mediconnect-dist.zip".)
+      ART = "mediconnect-dist.zip"
+      else
+        (cd "$BUILD_OUT" && tar - czf "$WORKSPACE/mediconnect-dist.tar.gz".)
+      ART = "mediconnect-dist.tar.gz"
+      fi
+      ls - lh "$WORKSPACE/$ART"
 
-pushd "$FRONTEND_DIR" >/dev/null
-npm run build
-test -d dist || { echo "::error::No dist/ folder found"; exit 1; }
-echo "BUILD_OUT=$(pwd)/dist" > "$WORKSPACE/build_out.env"
-popd >/dev/null
-'''
-      }
-    }
+      # Upload to / tmp on the instance
+      scp - i "$KEYFILE" - o StrictHostKeyChecking = no "$WORKSPACE/$ART"
+      "${SSH_USER}@${EC2_HOST}:/tmp/$ART"
 
-    stage('Package (backend)') {
-      steps {
-        sh '''#!/bin/bash
-set -euo pipefail
-rm -f backend.tgz || true
+      # Run the remote deploy via heredoc(avoids quoting issues)
+      ssh - i "$KEYFILE" - o StrictHostKeyChecking = no "${SSH_USER}@${EC2_HOST}"
+      'bash -s' << 'REMOTE'
+      set - euo pipefail
 
-if [ -f "$BACKEND_DIR/package.json" ]; then
-  pushd "$BACKEND_DIR" >/dev/null
-  tar -czf "$WORKSPACE/backend.tgz" \
-    package.json package-lock.json \
-    $( [ -d dist ] && echo dist ) \
-    $( [ -d src ]  && echo src ) || true
-  popd >/dev/null
-  ls -lh backend.tgz || true
-else
-  echo "::notice::Skipping backend package (no $BACKEND_DIR/package.json)"
-fi
-'''
-      }
-    }
+      APP_DIR = "/var/www/mediconnect"
+      ART_ZIP = "/tmp/mediconnect-dist.zip"
+      ART_TAR = "/tmp/mediconnect-dist.tar.gz"
 
-    stage('Deploy to Dev Env - AWS EC2') {
-      when { branch 'main' }   // deploy only from main
-      steps {
-        withCredentials([sshUserPrivateKey(credentialsId: env.EC2_CRED, keyFileVariable: 'KEYFILE')]) {
-          sh '''#!/bin/bash
-set -euo pipefail
+      # tools we need
+      sudo apt - get update - y > /dev/null
+      2 > & 1 || true
+      sudo apt - get install - y unzip > /dev/null
+      2 > & 1 || true
 
-source "$WORKSPACE/build_out.env"
+      # extract into a temp directory
+      TMPD = "$(mktemp -d /tmp/mediconnect.XXXX)"
+      if [-f "$ART_ZIP"];
+      then
+      sudo unzip - q "$ART_ZIP" - d "$TMPD"
+      else
+        sudo tar - xzf "$ART_TAR" - C "$TMPD"
+      fi
 
-# compress dist to a single artifact
-rm -f mediconnect-dist.zip mediconnect-dist.tar.gz || true
-if command -v zip >/dev/null 2>&1; then
-  (cd "$BUILD_OUT" && zip -r "$WORKSPACE/mediconnect-dist.zip" .)
-  ART="mediconnect-dist.zip"
-else
-  (cd "$BUILD_OUT" && tar -czf "$WORKSPACE/mediconnect-dist.tar.gz" .)
-  ART="mediconnect-dist.tar.gz"
-fi
-ls -lh "$WORKSPACE/$ART"
+      # atomic swap
+      TS = "$(date +%s)"
+      if [-d "$APP_DIR"];
+      then
+      sudo mv "$APP_DIR"
+      "${APP_DIR}.bak.$TS"
+      fi
+      sudo mkdir - p "$(dirname "
+      $APP_DIR ")"
+      sudo mv "$TMPD"
+      "$APP_DIR"
 
-# upload
-scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/$ART" ${SSH_USER}@${EC2_HOST}:/tmp/$ART
+      # permissions so nginx can read(www - data is nginx user on Ubuntu)
+      sudo chown - R www - data: www - data "$APP_DIR"
+      sudo find "$APP_DIR" - type d - exec chmod 755 {} +
+        sudo find "$APP_DIR" - type f - exec chmod 644 {} +
 
-# remote deploy (atomic swap) + nginx reload
-ssh -i "$KEYFILE" -o StrictHostKeyChecking=no ${SSH_USER}@${EC2_HOST} 'bash -lc "
-  set -e
-  sudo apt-get update -y >/dev/null 2>&1 || true
-  sudo apt-get install -y unzip >/dev/null 2>&1 || true
+        # reload nginx and clean up
+      sudo systemctl reload nginx || true
+      sudo rm - f "$ART_ZIP"
+      "$ART_TAR" || true
 
-  sudo rm -rf '${APP_DIR}.new'
-  sudo mkdir -p '${APP_DIR}.new'
-  sudo chown -R appuser:appuser '${APP_DIR}.new'
-
-  sudo -u appuser bash -lc \"
-    cd '${APP_DIR}.new'
-    if [ -f /tmp/mediconnect-dist.zip ]; then
-      unzip -q /tmp/mediconnect-dist.zip
-    else
-      tar -xzf /tmp/mediconnect-dist.tar.gz
-    fi
-  \"
-
-  if [ -d '${APP_DIR}' ]; then
-    sudo mv '${APP_DIR}' '${APP_DIR}.bak.'$(date +%s)
-  fi
-  sudo mv '${APP_DIR}.new' '${APP_DIR}'
-
-  sudo systemctl reload nginx || true
-  rm -f /tmp/mediconnect-dist.zip /tmp/mediconnect-dist.tar.gz || true
-  echo '✅ Deployed static frontend to ${APP_DIR}'
-"'
-'''
-        }
-      }
+      echo "✅ Deployed static frontend to $APP_DIR"
+      REMOTE
+        ''
+      '
     }
   }
+}
 
   post {
     success {
