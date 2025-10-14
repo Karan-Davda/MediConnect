@@ -13,7 +13,7 @@ pipeline {
     // --- EC2 SSH for deploy ---
     EC2_HOST = 'ec2-3-22-13-29.us-east-2.compute.amazonaws.com'
     SSH_USER = 'ubuntu'
-    EC2_CRED = 'aws-deploy-key'  // your Jenkins credential ID
+    EC2_CRED = 'aws-deploy-key'  // Jenkins credential ID
   }
 
   stages {
@@ -198,10 +198,10 @@ pipeline {
 
   post {
     success {
-      script {
-        def short = readFile('.git/short').trim()
-        echo "✅ ${env.BRANCH_NAME}@${short} succeeded"
-      }
+      // Keep it simple: use the full SHA Jenkins provides
+      echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT} succeeded"
+      // If you really want short SHA:
+      // sh 'echo "✅ ${BRANCH_NAME}@$(cat .git/short) succeeded"'
     }
     always {
       archiveArtifacts artifacts: 'build_out.env,backend.tgz,**/dist/**', allowEmptyArchive: true
@@ -209,4 +209,3 @@ pipeline {
     }
   }
 }
-
