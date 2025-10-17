@@ -1,3 +1,44 @@
+// ---------- helpers (must be outside the pipeline block) ----------
+@NonCPS
+String logTail(int maxLines) {
+  // Safely grab the last N lines of the console
+  def lines = currentBuild.rawBuild?.getLog(maxLines) ?: []
+  return lines.join("\n")
+}
+
+void notifySlack(String status, String channel = null) {
+  def ok = (status == 'SUCCESS')
+  def color = ok ? '#2eb886' : '#a30200'      // Slack "good" / "danger"
+  def emoji = ok ? '✅' : '❌'
+  def url = "${env.BUILD_URL ?: ''}"
+  def consoleUrl = url ? (url + 'console') : ''
+  def shortSha = (env.GIT_COMMIT?.length() ?: 0) >= 7 ? env.GIT_COMMIT.substring(0,7) : (env.GIT_COMMIT ?: 'unknown')
+
+  // Pull a tail of the console and trim to keep Slack happy
+  def tail = logTail(200)
+  if (tail.length() > 3500) {
+    tail = tail.take(3500) + "\n…(truncated)…"
+  }
+
+  def msg = """${emoji} *${env.JOB_NAME}* #${env.BUILD_NUMBER} (${env.BRANCH_NAME}@${shortSha}) *${status}*
+• *Author:* ${env.CHANGE_AUTHOR ?: 'N/A'}
+• *Duration:* ${currentBuild.durationString ?: 'N/A'}
+• *Link:* ${url}
+• *Console:* ${consoleUrl}
+
+*Last 200 lines of console:*
+```text
+${tail}
+```"""
+
+  // channel param is optional if default channel is configured in Jenkins → System → Slack
+  if (channel) {
+    slackSend(channel: channel, color: color, message: msg)
+  } else {
+    slackSend(color: color, message: msg)
+  }
+}
+
 pipeline {
   
   agent any
@@ -220,7 +261,23 @@ REMOTE
 
   post {
     success {
-      echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT} succeeded"
+      script {
+        // Prefer explicit channel env.SLACK_CHANNEL; fallback to Jenkins default if blank
+        if (env.SLACK_CHANNEL?.trim()) {
+          notifySlack('SUCCESS', env.SLACK_CHANNEL)
+        } else {
+          notifySlack('SUCCESS')
+        }
+      }
+    }
+    failure {
+      script {
+        if (env.SLACK_CHANNEL?.trim()) {
+          notifySlack('FAILURE', env.SLACK_CHANNEL)
+        } else {
+          notifySlack('FAILURE')
+        }
+      }
     }
     always {
       archiveArtifacts artifacts: 'build_out.env,backend.tgz,**/dist/**', allowEmptyArchive: true
