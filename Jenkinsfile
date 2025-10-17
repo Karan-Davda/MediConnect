@@ -1,46 +1,4 @@
-// ---------- helpers (must be outside the pipeline block) ----------
-@NonCPS
-String logTail(int maxLines) {
-  // Safely grab the last N lines of the console
-  def lines = currentBuild.rawBuild?.getLog(maxLines) ?: []
-  return lines.join("\n")
-}
-
-void notifySlack(String status, String channel = null) {
-  def ok = (status == 'SUCCESS')
-  def color = ok ? '#2eb886' : '#a30200'      // Slack "good" / "danger"
-  def emoji = ok ? '✅' : '❌'
-  def url = "${env.BUILD_URL ?: ''}"
-  def consoleUrl = url ? (url + 'console') : ''
-  def shortSha = (env.GIT_COMMIT?.length() ?: 0) >= 7 ? env.GIT_COMMIT.substring(0,7) : (env.GIT_COMMIT ?: 'unknown')
-
-  // Pull a tail of the console and trim to keep Slack happy
-  def tail = logTail(200)
-  if (tail.length() > 3500) {
-    tail = tail.take(3500) + "\n…(truncated)…"
-  }
-
-  def msg = """${emoji} *${env.JOB_NAME}* #${env.BUILD_NUMBER} (${env.BRANCH_NAME}@${shortSha}) *${status}*
-• *Author:* ${env.CHANGE_AUTHOR ?: 'N/A'}
-• *Duration:* ${currentBuild.durationString ?: 'N/A'}
-• *Link:* ${url}
-• *Console:* ${consoleUrl}
-
-*Last 200 lines of console:*
-```text
-${tail}
-```"""
-
-  // channel param is optional if default channel is configured in Jenkins → System → Slack
-  if (channel) {
-    slackSend(channel: channel, color: color, message: msg)
-  } else {
-    slackSend(color: color, message: msg)
-  }
-}
-
 pipeline {
-  
   agent any
   options { timestamps() }
 
@@ -56,6 +14,9 @@ pipeline {
     EC2_HOST = 'ec2-3-22-13-29.us-east-2.compute.amazonaws.com'
     SSH_USER = 'ubuntu'
     EC2_CRED = 'aws-deploy-key'   // Jenkins credential ID
+
+    // --- Slack channel (leave blank to use Jenkins default) ---
+    SLACK_CHANNEL = '#mediconnect-ci'
   }
 
   stages {
@@ -93,7 +54,6 @@ npm -v
         sh '''#!/bin/bash
 set -euo pipefail
 
-# load Node 20 for this step
 export NVM_DIR="$HOME/.nvm"
 source "$NVM_DIR/nvm.sh"
 nvm use 20 >/dev/null
@@ -124,7 +84,6 @@ fi
         sh '''#!/bin/bash
 set -euo pipefail
 
-# load Node 20 for this step
 export NVM_DIR="$HOME/.nvm"
 source "$NVM_DIR/nvm.sh"
 nvm use 20 >/dev/null
@@ -137,10 +96,9 @@ if [ -f "$FRONTEND_DIR/package.json" ]; then
   popd >/dev/null
 fi
 
-# Backend (will not fail if you still have placeholder tests)
+# Backend (non-blocking while you ramp up tests)
 if [ -f "$BACKEND_DIR/package.json" ]; then
   pushd "$BACKEND_DIR" >/dev/null
-  # If your package.json still has the placeholder "exit 1", make it non-blocking:
   npm run lint --if-present || echo "[backend] lint skipped/failed (non-blocking)"
   npm test --if-present || echo "[backend] tests skipped/failed (non-blocking)"
   popd >/dev/null
@@ -154,7 +112,6 @@ fi
         sh '''#!/bin/bash
 set -euo pipefail
 
-# load Node 20 for this step
 export NVM_DIR="$HOME/.nvm"
 source "$NVM_DIR/nvm.sh"
 nvm use 20 >/dev/null
@@ -262,20 +219,42 @@ REMOTE
   post {
     success {
       script {
-        // Prefer explicit channel env.SLACK_CHANNEL; fallback to Jenkins default if blank
+        // Get last 200 lines of console via HTTP (works in sandbox)
+        def tail = sh(returnStdout: true, script: 'curl -s "${BUILD_URL}consoleText" | tail -n 200 || true').trim()
+        if (tail.length() > 3500) { tail = tail.take(3500) + "\\n…(truncated)…" }
+        def shortSha = (env.GIT_COMMIT?.length() ?: 0) >= 7 ? env.GIT_COMMIT.substring(0,7) : (env.GIT_COMMIT ?: 'unknown')
+        def msg = """✅ *${env.JOB_NAME}* #${env.BUILD_NUMBER} (${env.BRANCH_NAME}@${shortSha}) *SUCCESS*
+• *Link:* ${env.BUILD_URL}
+• *Console:* ${env.BUILD_URL}console
+
+*Last 200 lines of console:*
+```text
+${tail}
+```"""
         if (env.SLACK_CHANNEL?.trim()) {
-          notifySlack('SUCCESS', env.SLACK_CHANNEL)
+          slackSend channel: env.SLACK_CHANNEL, color: '#2eb886', message: msg
         } else {
-          notifySlack('SUCCESS')
+          slackSend color: '#2eb886', message: msg
         }
       }
     }
     failure {
       script {
+        def tail = sh(returnStdout: true, script: 'curl -s "${BUILD_URL}consoleText" | tail -n 200 || true').trim()
+        if (tail.length() > 3500) { tail = tail.take(3500) + "\\n…(truncated)…" }
+        def shortSha = (env.GIT_COMMIT?.length() ?: 0) >= 7 ? env.GIT_COMMIT.substring(0,7) : (env.GIT_COMMIT ?: 'unknown')
+        def msg = """❌ *${env.JOB_NAME}* #${env.BUILD_NUMBER} (${env.BRANCH_NAME}@${shortSha}) *FAILURE*
+• *Link:* ${env.BUILD_URL}
+• *Console:* ${env.BUILD_URL}console
+
+*Last 200 lines of console:*
+```text
+${tail}
+```"""
         if (env.SLACK_CHANNEL?.trim()) {
-          notifySlack('FAILURE', env.SLACK_CHANNEL)
+          slackSend channel: env.SLACK_CHANNEL, color: '#a30200', message: msg
         } else {
-          notifySlack('FAILURE')
+          slackSend color: '#a30200', message: msg
         }
       }
     }
