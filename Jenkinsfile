@@ -1,4 +1,5 @@
 pipeline {
+  
   agent any
   options { timestamps() }
 
@@ -14,9 +15,6 @@ pipeline {
     EC2_HOST = 'ec2-3-22-13-29.us-east-2.compute.amazonaws.com'
     SSH_USER = 'ubuntu'
     EC2_CRED = 'aws-deploy-key'   // Jenkins credential ID
-
-    // --- Slack channel (leave blank to use Jenkins default) ---
-    SLACK_CHANNEL = '#mediconnect-ci'
   }
 
   stages {
@@ -54,6 +52,7 @@ npm -v
         sh '''#!/bin/bash
 set -euo pipefail
 
+# load Node 20 for this step
 export NVM_DIR="$HOME/.nvm"
 source "$NVM_DIR/nvm.sh"
 nvm use 20 >/dev/null
@@ -84,6 +83,7 @@ fi
         sh '''#!/bin/bash
 set -euo pipefail
 
+# load Node 20 for this step
 export NVM_DIR="$HOME/.nvm"
 source "$NVM_DIR/nvm.sh"
 nvm use 20 >/dev/null
@@ -96,9 +96,10 @@ if [ -f "$FRONTEND_DIR/package.json" ]; then
   popd >/dev/null
 fi
 
-# Backend (non-blocking while you ramp up tests)
+# Backend (will not fail if you still have placeholder tests)
 if [ -f "$BACKEND_DIR/package.json" ]; then
   pushd "$BACKEND_DIR" >/dev/null
+  # If your package.json still has the placeholder "exit 1", make it non-blocking:
   npm run lint --if-present || echo "[backend] lint skipped/failed (non-blocking)"
   npm test --if-present || echo "[backend] tests skipped/failed (non-blocking)"
   popd >/dev/null
@@ -112,6 +113,7 @@ fi
         sh '''#!/bin/bash
 set -euo pipefail
 
+# load Node 20 for this step
 export NVM_DIR="$HOME/.nvm"
 source "$NVM_DIR/nvm.sh"
 nvm use 20 >/dev/null
@@ -219,43 +221,18 @@ REMOTE
   post {
     success {
       script {
-        // Get last 200 lines of console via HTTP (works in sandbox)
-        def tail = sh(returnStdout: true, script: 'curl -s "${BUILD_URL}consoleText" | tail -n 200 || true').trim()
-        if (tail.length() > 3500) { tail = tail.take(3500) + "\\n…(truncated)…" }
-        def shortSha = (env.GIT_COMMIT?.length() ?: 0) >= 7 ? env.GIT_COMMIT.substring(0,7) : (env.GIT_COMMIT ?: 'unknown')
-        def msg = """✅ *${env.JOB_NAME}* #${env.BUILD_NUMBER} (${env.BRANCH_NAME}@${shortSha}) *SUCCESS*
-• *Link:* ${env.BUILD_URL}
-• *Console:* ${env.BUILD_URL}console
-
-*Last 200 lines of console:*
-```text
-${tail}
-```"""
-        if (env.SLACK_CHANNEL?.trim()) {
-          slackSend channel: env.SLACK_CHANNEL, color: '#2eb886', message: msg
-        } else {
-          slackSend color: '#2eb886', message: msg
-        }
+        // Build a simple message using env vars (uses global Slack config)
+        def shortSha = (env.GIT_COMMIT?.length() ?: 0) >= 7 ? env.GIT_COMMIT.substring(0,7) : (env.GIT_COMMIT ?: "unknown")
+        def msg = "Build SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BRANCH_NAME}@${shortSha})\\n${env.BUILD_URL}"
+        slackSend color: '#2eb886', message: "✅ ${msg}"
       }
+      echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT} succeeded"
     }
     failure {
       script {
-        def tail = sh(returnStdout: true, script: 'curl -s "${BUILD_URL}consoleText" | tail -n 200 || true').trim()
-        if (tail.length() > 3500) { tail = tail.take(3500) + "\\n…(truncated)…" }
-        def shortSha = (env.GIT_COMMIT?.length() ?: 0) >= 7 ? env.GIT_COMMIT.substring(0,7) : (env.GIT_COMMIT ?: 'unknown')
-        def msg = """❌ *${env.JOB_NAME}* #${env.BUILD_NUMBER} (${env.BRANCH_NAME}@${shortSha}) *FAILURE*
-• *Link:* ${env.BUILD_URL}
-• *Console:* ${env.BUILD_URL}console
-
-*Last 200 lines of console:*
-```text
-${tail}
-```"""
-        if (env.SLACK_CHANNEL?.trim()) {
-          slackSend channel: env.SLACK_CHANNEL, color: '#a30200', message: msg
-        } else {
-          slackSend color: '#a30200', message: msg
-        }
+        def shortSha = (env.GIT_COMMIT?.length() ?: 0) >= 7 ? env.GIT_COMMIT.substring(0,7) : (env.GIT_COMMIT ?: "unknown")
+        def msg = "Build FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BRANCH_NAME}@${shortSha})\\n${env.BUILD_URL}console"
+        slackSend color: '#a30200', message: "❌ ${msg}"
       }
     }
     always {
