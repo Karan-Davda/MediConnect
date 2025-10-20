@@ -18,7 +18,7 @@ const defaultAccount: Account = {
   preferences: { theme: 'light', notifications: true },
 };
 
-const AccountPage: React.FC = () => {
+const Registration: React.FC = () => {
   const [account, setAccount] = useState<Account>(defaultAccount);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -141,4 +141,4 @@ const AccountPage: React.FC = () => {
   );
 };
 
-export default AccountPage;
+export default Registration; 
