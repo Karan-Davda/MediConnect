@@ -1,0 +1,57 @@
+@import './PatientRegister.css';
+
+.toggle-container {
+  background: #f7fafc;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 25px;
+  text-align: center;
+  border: 1px solid #e2e8f0;
+}
+
+.toggle-label {
+  margin-bottom: 15px;
+  color: #718096;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.toggle-pills {
+  display: inline-flex;
+  background: white;
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e2e8f0;
+}
+
+.toggle-pill {
+  padding: 10px 30px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #718096;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.toggle-pill.active {
+  background: #667eea;
+  color: white;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+}
+
+.toggle-pill:hover:not(.active) {
+  background: #f7fafc;
+  color: #2d3748;
+}
+
+@media (max-width: 768px) {
+  .toggle-pill {
+    padding: 8px 20px;
+    font-size: 0.9rem;
+  }
+}
