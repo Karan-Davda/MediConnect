@@ -20,7 +20,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
       <nav className="sidebar-nav">
         <ul className="nav-list">
           <li className="nav-item active">
-            <a href="#" className="nav-link">
+            <a href="/home" className="nav-link">
               <span className="nav-icon">📊</span>
               <span className="nav-text">Dashboard</span>
             </a>
@@ -38,9 +38,9 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
             </a>
           </li>
           <li className="nav-item">
-            <a href="#" className="nav-link">
+            <a href="/account" className="nav-link" data-tooltip="Manage your account settings">
               <span className="nav-icon">👤</span>
-              <span className="nav-text">Profile</span>
+              <span className="nav-text">Account</span>
             </a>
           </li>
           <li className="nav-item">
