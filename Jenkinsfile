@@ -22,17 +22,20 @@ pipeline {
 
     // --- Node runtime on agent ---
     NODE_MAJOR = '22'
+    // will set GIT_COMMIT_SHORT in Checkout stage
   }
 
   stages {
     stage('Checkout') {
       steps {
         checkout scm
-        sh """#!/usr/bin/env bash
-set -e
-git rev-parse --short HEAD > .git/short
-cat .git/short
-"""
+        script {
+          env.GIT_COMMIT_SHORT = sh(
+            script: "git rev-parse --short HEAD",
+            returnStdout: true
+          ).trim()
+          echo "Commit: ${env.GIT_COMMIT_SHORT}"
+        }
       }
     }
 
@@ -188,18 +191,18 @@ REMOTE
 
   post {
     success {
-      def short = readFile('.git/short').trim()
-      echo "✅ ${env.BRANCH_NAME}@${short} deployed OK"
+      // Use the env var computed in Checkout (no 'def' here)
+      echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed OK"
       slackSend(
         color: '#2EB67D',
-        message: "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${short}`\n<${env.BUILD_URL}|View Console Output>"
+        message: "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
       )
     }
     failure {
-      echo "❌ ${env.BRANCH_NAME} failed"
+      echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed"
       slackSend(
         color: '#E01E5A',
-        message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\n<${env.BUILD_URL}|View Console Output>"
+        message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
       )
     }
     always {
