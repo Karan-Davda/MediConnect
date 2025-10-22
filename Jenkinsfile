@@ -1,4 +1,4 @@
-// Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev Env - AWS EC2
+// Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev Env (main)
 
 pipeline {
   agent any
@@ -11,17 +11,14 @@ pipeline {
   }
 
   environment {
-    // --- Paths in repo ---
+    // --- repo layout ---
     FRONTEND_DIR  = 'Frontend/web'
     BACKEND_DIR   = 'Backend'
-
-    // --- Remote deploy target (Nginx serves this) ---
-    APP_DIR       = '/var/www/mediconnect'
 
     // --- EC2 SSH for deploy ---
     EC2_HOST = 'ec2-3-22-13-29.us-east-2.compute.amazonaws.com'
     SSH_USER = 'ubuntu'
-    EC2_CRED = 'aws-deploy-key' // Jenkins "SSH Username with private key" credentials ID
+    EC2_CRED = 'aws-deploy-key' // Jenkins credential id: SSH Username with private key
 
     // --- Node runtime on agent ---
     NODE_MAJOR = '22'
@@ -119,32 +116,33 @@ fi
       }
     }
 
-    // -------- YOUR DEPLOY STAGE (verbatim, with double quotes) --------
+    // -------- Deploy only from 'main' --------
     stage('Deploy to Dev Env - AWS EC2') {
-      when { branch 'main' } // deploy only from main
+      when { branch 'main' }
       steps {
         withCredentials([sshUserPrivateKey(credentialsId: env.EC2_CRED, keyFileVariable: 'KEYFILE')]) {
-          sh """#!/bin/bash
+          sh '''#!/bin/bash
 set -euo pipefail
 
-source "\$WORKSPACE/build_out.env"
+# Build stage wrote BUILD_OUT into this file
+source "$WORKSPACE/build_out.env"
 
 # Prepare a single archive to upload
 rm -f mediconnect-dist.zip mediconnect-dist.tar.gz || true
 if command -v zip >/dev/null 2>&1; then
-  (cd "\$BUILD_OUT" && zip -r "\$WORKSPACE/mediconnect-dist.zip" .)
+  (cd "$BUILD_OUT" && zip -r "$WORKSPACE/mediconnect-dist.zip" .)
   ART="mediconnect-dist.zip"
 else
-  (cd "\$BUILD_OUT" && tar -czf "\$WORKSPACE/mediconnect-dist.tar.gz" .)
+  (cd "$BUILD_OUT" && tar -czf "$WORKSPACE/mediconnect-dist.tar.gz" .)
   ART="mediconnect-dist.tar.gz"
 fi
-ls -lh "\$WORKSPACE/\$ART"
+ls -lh "$WORKSPACE/$ART"
 
 # Upload to /tmp on the instance
-scp -i "\$KEYFILE" -o StrictHostKeyChecking=no "\$WORKSPACE/\$ART" "${SSH_USER}@${EC2_HOST}:/tmp/\$ART"
+scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/$ART" "$SSH_USER@$EC2_HOST:/tmp/$ART"
 
 # Run the remote deploy via heredoc (avoids quoting issues)
-ssh -i "\$KEYFILE" -o StrictHostKeyChecking=no "${SSH_USER}@${EC2_HOST}" 'bash -s' <<'REMOTE'
+ssh -i "$KEYFILE" -o StrictHostKeyChecking=no "$SSH_USER@$EC2_HOST" 'bash -s' <<'REMOTE'
 set -euo pipefail
 
 APP_DIR="/var/www/mediconnect"
@@ -182,7 +180,7 @@ sudo rm -f "$ART_ZIP" "$ART_TAR" || true
 
 echo "✅ Deployed static frontend to $APP_DIR"
 REMOTE
-"""
+'''
         }
       }
     }
@@ -190,14 +188,19 @@ REMOTE
 
   post {
     success {
-      echo "✅ ${env.BRANCH_NAME}@${readFile('.git/short').trim()} deployed OK"
-      slackSend(color: '#2EB67D',
-        message: "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\\nBranch: *${env.BRANCH_NAME}*\\nCommit: `${readFile('.git/short').trim()}`\\n<${env.BUILD_URL}|View Console Output>")
+      def short = readFile('.git/short').trim()
+      echo "✅ ${env.BRANCH_NAME}@${short} deployed OK"
+      slackSend(
+        color: '#2EB67D',
+        message: "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${short}`\n<${env.BUILD_URL}|View Console Output>"
+      )
     }
     failure {
       echo "❌ ${env.BRANCH_NAME} failed"
-      slackSend(color: '#E01E5A',
-        message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\\nBranch: *${env.BRANCH_NAME}*\\n<${env.BUILD_URL}|View Console Output>")
+      slackSend(
+        color: '#E01E5A',
+        message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\n<${env.BUILD_URL}|View Console Output>"
+      )
     }
     always {
       archiveArtifacts allowEmptyArchive: true, artifacts: "build_out.env,backend.tgz,**/dist/**"
