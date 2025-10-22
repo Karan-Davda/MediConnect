@@ -189,24 +189,23 @@ REMOTE
     }
   } // stages
 
-  post {
-    success {
-      // Use the env var computed in Checkout (no 'def' here)
-      echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed OK"
-      slackSend(
-        color: '#2EB67D',
-        message: "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
-      )
-    }
-    failure {
-      echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed"
-      slackSend(
-        color: '#E01E5A',
-        message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
-      )
-    }
-    always {
-      archiveArtifacts allowEmptyArchive: true, artifacts: "build_out.env,backend.tgz,**/dist/**"
-    }
+post {
+  success {
+    echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed OK"
+    slackSend(
+      color: '#2EB67D',
+      message: "✅ *User Story 01.01 — Staff Onboarding Implemented, deployed to QA and is available for testing.*\n\n*Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
+    )
   }
+  failure {
+    echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed"
+    slackSend(
+      color: '#E01E5A',
+      message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
+    )
+  }
+  always {
+    archiveArtifacts allowEmptyArchive: true, artifacts: "build_out.env,backend.tgz,**/dist/**"
+  }
+}
 }
