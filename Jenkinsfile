@@ -1,4 +1,4 @@
-// Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev Env (main)
+// Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev/QA
 
 pipeline {
   agent any
@@ -10,30 +10,35 @@ pipeline {
     timeout(time: 30, unit: 'MINUTES')
   }
 
+  parameters {
+    booleanParam(name: 'RUN_DEPLOY', defaultValue: true, description: 'Run deploy step when the branch matches an environment (main→Dev, qa→QA)')
+    choice(
+      name: 'FORCE_ENV',
+      choices: ['AUTO','DEV','QA'],
+      description: 'AUTO = derive from branch (main→DEV, qa→QA). Override only if needed.'
+    )
+  }
+
   environment {
     // --- repo layout ---
     FRONTEND_DIR  = 'Frontend/web'
     BACKEND_DIR   = 'Backend'
 
-    // --- EC2 SSH for deploy ---
-    EC2_HOST = 'ec2-3-22-13-29.us-east-2.compute.amazonaws.com'
-    SSH_USER = 'ubuntu'
-    EC2_CRED = 'aws-deploy-key' // Jenkins credential id: SSH Username with private key
+    // --- SSH user for all EC2 boxes ---
+    SSH_USER      = 'ubuntu'
 
     // --- Node runtime on agent ---
-    NODE_MAJOR = '22'
-    // will set GIT_COMMIT_SHORT in Checkout stage
+    NODE_MAJOR    = '22'
+    // Will set: GIT_COMMIT_SHORT, TARGET_ENV, EC2_HOST, EC2_CRED, APP_DIR
   }
 
   stages {
+
     stage('Checkout') {
       steps {
         checkout scm
         script {
-          env.GIT_COMMIT_SHORT = sh(
-            script: "git rev-parse --short HEAD",
-            returnStdout: true
-          ).trim()
+          env.GIT_COMMIT_SHORT = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
           echo "Commit: ${env.GIT_COMMIT_SHORT}"
         }
       }
@@ -62,6 +67,7 @@ npm -v
 set -euo pipefail
 export NVM_DIR="\$HOME/.nvm"; . "\$NVM_DIR/nvm.sh"; nvm use ${NODE_MAJOR} >/dev/null
 
+# Frontend deps
 if [ -f "${FRONTEND_DIR}/package.json" ]; then
   pushd "${FRONTEND_DIR}" >/dev/null
   NPM_CONFIG_PRODUCTION=false npm ci --include=dev || NPM_CONFIG_PRODUCTION=false npm install
@@ -70,6 +76,7 @@ else
   echo "No ${FRONTEND_DIR}/package.json — skipping FE deps"
 fi
 
+# Backend deps (optional)
 if [ -f "${BACKEND_DIR}/package.json" ]; then
   pushd "${BACKEND_DIR}" >/dev/null
   npm ci || npm install
@@ -119,15 +126,54 @@ fi
       }
     }
 
-    // -------- Deploy only from 'main' --------
-    stage('Deploy to Dev Env - AWS EC2') {
-      when { branch 'main' }
+    // ---------------- Env selection (Dev/QA) ----------------
+    stage('Select Environment') {
+      steps {
+        script {
+          // EDIT these QA values to your real QA host + credential + webroot
+          def CFG = [
+            DEV: [ branch: 'main',
+                   host:   'ec2-3-22-13-29.us-east-2.compute.amazonaws.com',
+                   cred:   'aws-deploy-key',
+                   webroot:'/var/www/mediconnect' ],
+            QA : [ branch: 'qa',
+                   host:   'ec2-3-144-150-239.us-east-2.compute.amazonaws.com', // TODO change to QA host
+                   cred:   'aws-qa-key',                                      // TODO create Jenkins SSH cred
+                   webroot:'/var/www/mediconnect-qa' ]                        // TODO QA nginx root
+          ]
+
+          def t = params.FORCE_ENV
+          if (t == 'AUTO') {
+            t = (env.BRANCH_NAME == CFG.QA.branch) ? 'QA'
+                : (env.BRANCH_NAME == CFG.DEV.branch) ? 'DEV'
+                : 'NONE'
+          }
+
+          env.TARGET_ENV = t
+          if (t == 'NONE') {
+            echo "No matching environment for branch '${env.BRANCH_NAME}'. Deploy will be skipped."
+          } else {
+            env.EC2_HOST = CFG[t].host
+            env.EC2_CRED = CFG[t].cred
+            env.APP_DIR  = CFG[t].webroot
+            echo "Target environment: ${env.TARGET_ENV} → ${env.EC2_HOST} (${env.APP_DIR})"
+          }
+        }
+      }
+    }
+
+    // ---------------- Deploy (runs for Dev or QA) ----------------
+    stage('Deploy to AWS') {
+      when {
+        allOf {
+          expression { return params.RUN_DEPLOY }
+          expression { return env.TARGET_ENV && env.TARGET_ENV != 'NONE' }
+        }
+      }
       steps {
         withCredentials([sshUserPrivateKey(credentialsId: env.EC2_CRED, keyFileVariable: 'KEYFILE')]) {
-          sh '''#!/bin/bash
+          sh '''#!/usr/bin/env bash
 set -euo pipefail
-
-# Build stage wrote BUILD_OUT into this file
 source "$WORKSPACE/build_out.env"
 
 # Prepare a single archive to upload
@@ -144,19 +190,19 @@ ls -lh "$WORKSPACE/$ART"
 # Upload to /tmp on the instance
 scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/$ART" "$SSH_USER@$EC2_HOST:/tmp/$ART"
 
-# Run the remote deploy via heredoc (avoids quoting issues)
-ssh -i "$KEYFILE" -o StrictHostKeyChecking=no "$SSH_USER@$EC2_HOST" 'bash -s' <<'REMOTE'
+# Pass APP_DIR into remote environment and run remote deploy
+APP_DIR_SAFE="${APP_DIR}"
+ssh -i "$KEYFILE" -o StrictHostKeyChecking=no "$SSH_USER@$EC2_HOST" "APP_DIR=\"$APP_DIR_SAFE\" bash -s" <<'REMOTE'
 set -euo pipefail
 
-APP_DIR="/var/www/mediconnect"
 ART_ZIP="/tmp/mediconnect-dist.zip"
 ART_TAR="/tmp/mediconnect-dist.tar.gz"
 
-# tools we need
+# Install tools we may need
 sudo apt-get update -y >/dev/null 2>&1 || true
 sudo apt-get install -y unzip >/dev/null 2>&1 || true
 
-# extract into a temp directory
+# Extract into a temp directory
 TMPD="$(mktemp -d /tmp/mediconnect.XXXX)"
 if [ -f "$ART_ZIP" ]; then
   sudo unzip -q "$ART_ZIP" -d "$TMPD"
@@ -164,7 +210,7 @@ else
   sudo tar -xzf "$ART_TAR" -C "$TMPD"
 fi
 
-# atomic swap
+# Atomic swap
 TS="$(date +%s)"
 if [ -d "$APP_DIR" ]; then
   sudo mv "$APP_DIR" "${APP_DIR}.bak.$TS"
@@ -172,12 +218,12 @@ fi
 sudo mkdir -p "$(dirname "$APP_DIR")"
 sudo mv "$TMPD" "$APP_DIR"
 
-# permissions so nginx can read (www-data is nginx user on Ubuntu)
+# Permissions for nginx
 sudo chown -R www-data:www-data "$APP_DIR"
 sudo find "$APP_DIR" -type d -exec chmod 755 {} +
 sudo find "$APP_DIR" -type f -exec chmod 644 {} +
 
-# reload nginx and clean up
+# Reload nginx and clean up
 sudo systemctl reload nginx || true
 sudo rm -f "$ART_ZIP" "$ART_TAR" || true
 
@@ -189,23 +235,32 @@ REMOTE
     }
   } // stages
 
-post {
-  success {
-    echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed OK"
-    slackSend(
-      color: '#2EB67D',
-      message: "✅ *User Story 01.03 — Staff Onboarding Implemented, deployed to QA and is available for testing.*\n\n*Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
-    )
+  post {
+    success {
+      echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed to ${env.TARGET_ENV}"
+      script {
+        try {
+          slackSend(
+            color: '#2EB67D',
+            message: "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nEnv: *${env.TARGET_ENV}*\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
+          )
+        } catch (e) { echo "Slack not configured: ${e.message}" }
+      }
+    }
+    failure {
+      echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed (env=${env.TARGET_ENV})"
+      script {
+        try {
+          slackSend(
+            color: '#E01E5A',
+            message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nEnv: *${env.TARGET_ENV ?: 'N/A'}*\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}console|View Console Output>"
+          )
+        } catch (e) { echo "Slack not configured: ${e.message}" }
+      }
+    }
+    always {
+      archiveArtifacts allowEmptyArchive: true, artifacts: "build_out.env,backend.tgz,**/dist/**"
+      echo "Build URL: ${env.BUILD_URL}"
+    }
   }
-  failure {
-    echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed"
-    slackSend(
-      color: '#E01E5A',
-      message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
-    )
-  }
-  always {
-    archiveArtifacts allowEmptyArchive: true, artifacts: "build_out.env,backend.tgz,**/dist/**"
-  }
-}
 }
