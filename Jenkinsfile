@@ -136,7 +136,7 @@ fi
                    host:   'ec2-3-22-13-29.us-east-2.compute.amazonaws.com',
                    cred:   'aws-deploy-key',
                    webroot:'/var/www/mediconnect' ],
-            QA : [ branch: 'qa',
+            QA : [ branch: 'QA',
                    host:   'ec2-3-144-150-239.us-east-2.compute.amazonaws.com', // TODO change to QA host
                    cred:   'aws-qa-key',                                      // TODO create Jenkins SSH cred
                    webroot:'/var/www/mediconnect-qa' ]                        // TODO QA nginx root
