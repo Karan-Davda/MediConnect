@@ -102,7 +102,6 @@ export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use ${NODE_MAJOR} >/dev/nu
 if [ -f '${BACKEND_DIR}/package.json' ]; then
   cd '${BACKEND_DIR}'
   rm -f ../backend.tgz
-  # include package files and either dist/ or src/
   tar -czf ../backend.tgz \
     package.json package-lock.json \
     $( [ -d dist ] && echo 'dist' ) \
@@ -114,7 +113,7 @@ fi
       }
     }
 
-    // ---------------------- DEPLOY TO DEV ----------------------
+    // ---------------------- DEPLOY TO DEVELOPMENT ----------------------
     stage('Deploy to Development') {
       when { branch 'staging' }
       steps {
@@ -122,29 +121,6 @@ fi
       }
     }
 
-    // ---------------------- DEPLOY TO QA ----------------------
-    stage('Deploy to QA') {
-      when { branch 'QA' }
-      steps {
-        script { deployToEnvironment('qa', env.QA_SERVER, env.QA_SSH_CRED) }
-      }
-    }
-
-    // ---------------------- PROD APPROVAL ----------------------
-    stage('Production Approval') {
-      when { branch 'main' }
-      steps {
-        input message: "Deploy ${env.GIT_COMMIT_SHORT} to Production?", ok: 'Deploy'
-      }
-    }
-
-    // ---------------------- DEPLOY TO PROD ----------------------
-    stage('Deploy to Production') {
-      when { branch 'main' }
-      steps {
-        script { deployToEnvironment('prod', env.PROD_SERVER, env.PROD_SSH_CRED) }
-      }
-    }
   }
 
   // ---------------------- POST ACTIONS ----------------------
@@ -198,7 +174,6 @@ def deployToEnvironment(String envName, String server, String credId) {
           tar -C \$HOME/apps/mediconnect-backend -xzf /tmp/backend.tgz
           rm -f /tmp/backend.tgz
 
-          # Ensure Node + npm via NVM for runtime
           export NVM_DIR=\"\$HOME/.nvm\"
           [ -s \"\$NVM_DIR/nvm.sh\" ] || curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
           . \"\$NVM_DIR/nvm.sh\"
@@ -209,7 +184,6 @@ def deployToEnvironment(String envName, String server, String credId) {
           cd \$HOME/apps/mediconnect-backend
           npm ci --omit=dev || npm install --omit=dev
 
-          # PM2 ensure + (re)start
           command -v pm2 >/dev/null 2>&1 || npm i -g pm2
           if pm2 list | grep -q \"${env.PM2_APP_NAME}\"; then
             pm2 restart \"${env.PM2_APP_NAME}\"
@@ -224,7 +198,6 @@ def deployToEnvironment(String envName, String server, String credId) {
 
       echo "==> Cleaning local artifacts"
       rm -f frontend.tgz || true
-      # backend.tgz kept for archiving
     """
   }
 }
