@@ -194,7 +194,7 @@ post {
     echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed OK"
     slackSend(
       color: '#2EB67D',
-      message: "✅ *User Story 01.01 — Staff Onboarding Implemented, deployed to QA and is available for testing.*\n\n*Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
+      message: "✅ *User Story 01.03 — Staff Onboarding Implemented, deployed to QA and is available for testing.*\n\n*Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
     )
   }
   failure {
