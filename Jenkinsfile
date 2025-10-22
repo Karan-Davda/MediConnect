@@ -1,9 +1,7 @@
+// Jenkinsfile for MediConnect (multibranch) — Node via NVM on agent (no NodeJS plugin required)
+
 pipeline {
   agent any
-
-  // If you have a NodeJS tool configured in Jenkins (Manage Jenkins → Global Tool Configuration),
-  // set its name here. Otherwise comment 'tools' and it will still work using system node.
-  tools { nodejs 'NodeJS-22' }
 
   environment {
     // ---- Servers ----
@@ -42,53 +40,77 @@ pipeline {
       }
     }
 
+    // ---------------------- INSTALL NODE (NVM) ----------------------
+    stage('Install Node (NVM)') {
+      steps {
+        sh '''#!/usr/bin/env bash
+set -euo pipefail
+export NVM_DIR="$HOME/.nvm"
+if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+fi
+. "$NVM_DIR/nvm.sh"
+nvm install ${NODE_MAJOR} >/dev/null
+nvm use ${NODE_MAJOR} >/dev/null
+node -v
+npm -v
+'''
+      }
+    }
+
     // ---------------------- INSTALL DEPS ----------------------
     stage('Install Dependencies') {
       steps {
-        sh """
-          set -e
-          if [ -f '${FRONTEND_DIR}/package.json' ]; then
-            cd '${FRONTEND_DIR}'
-            NPM_CONFIG_PRODUCTION=false npm ci --include=dev || NPM_CONFIG_PRODUCTION=false npm install
-          fi
+        sh '''#!/usr/bin/env bash
+set -euo pipefail
+export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use ${NODE_MAJOR} >/dev/null
 
-          if [ -f '${BACKEND_DIR}/package.json' ]; then
-            cd '${BACKEND_DIR}'
-            npm ci || npm install
-          fi
-        """
+if [ -f '${FRONTEND_DIR}/package.json' ]; then
+  cd '${FRONTEND_DIR}'
+  NPM_CONFIG_PRODUCTION=false npm ci --include=dev || NPM_CONFIG_PRODUCTION=false npm install
+fi
+
+if [ -f '${BACKEND_DIR}/package.json' ]; then
+  cd '${BACKEND_DIR}'
+  npm ci || npm install
+fi
+'''
       }
     }
 
     // ---------------------- BUILD FRONTEND ----------------------
     stage('Build Frontend') {
       steps {
-        sh """
-          set -e
-          cd '${FRONTEND_DIR}'
-          npm run build --if-present || npx --yes vite build
-          test -d dist || { echo 'No dist/ folder found after build'; exit 1; }
-        """
+        sh '''#!/usr/bin/env bash
+set -euo pipefail
+export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use ${NODE_MAJOR} >/dev/null
+
+cd '${FRONTEND_DIR}'
+npm run build --if-present || npx --yes vite build
+test -d dist || { echo 'No dist/ folder found after build'; exit 1; }
+'''
       }
     }
 
     // ---------------------- PACKAGE BACKEND ----------------------
     stage('Package Backend') {
       steps {
-        sh """
-          set -e
-          if [ -f '${BACKEND_DIR}/package.json' ]; then
-            cd '${BACKEND_DIR}'
-            rm -f ../backend.tgz
-            # include package files and either dist/ or src/
-            tar -czf ../backend.tgz \\
-              package.json package-lock.json \\
-              \$( [ -d dist ] && echo 'dist' ) \\
-              \$( [ -d src ]  && echo 'src' )
-          else
-            echo 'No backend/package.json — skipping backend package'
-          fi
-        """
+        sh '''#!/usr/bin/env bash
+set -euo pipefail
+export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use ${NODE_MAJOR} >/dev/null
+
+if [ -f '${BACKEND_DIR}/package.json' ]; then
+  cd '${BACKEND_DIR}'
+  rm -f ../backend.tgz
+  # include package files and either dist/ or src/
+  tar -czf ../backend.tgz \
+    package.json package-lock.json \
+    $( [ -d dist ] && echo 'dist' ) \
+    $( [ -d src ]  && echo 'src' )
+else
+  echo 'No backend/package.json — skipping backend package'
+fi
+'''
       }
     }
 
@@ -96,9 +118,7 @@ pipeline {
     stage('Deploy to Development') {
       when { branch 'staging' }
       steps {
-        script {
-          deployToEnvironment('dev', env.DEV_SERVER, env.DEV_SSH_CRED)
-        }
+        script { deployToEnvironment('dev', env.DEV_SERVER, env.DEV_SSH_CRED) }
       }
     }
 
@@ -106,9 +126,7 @@ pipeline {
     stage('Deploy to QA') {
       when { branch 'QA' }
       steps {
-        script {
-          deployToEnvironment('qa', env.QA_SERVER, env.QA_SSH_CRED)
-        }
+        script { deployToEnvironment('qa', env.QA_SERVER, env.QA_SSH_CRED) }
       }
     }
 
@@ -124,9 +142,7 @@ pipeline {
     stage('Deploy to Production') {
       when { branch 'main' }
       steps {
-        script {
-          deployToEnvironment('prod', env.PROD_SERVER, env.PROD_SSH_CRED)
-        }
+        script { deployToEnvironment('prod', env.PROD_SERVER, env.PROD_SSH_CRED) }
       }
     }
   }
