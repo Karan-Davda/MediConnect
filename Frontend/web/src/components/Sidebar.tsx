@@ -9,6 +9,7 @@ interface SidebarProps {
 
 const navItems = [
   { path: "/home", icon: "📊", label: "Dashboard" },
+  { path: "/find-doctors", icon: "🔍", label: "Find Doctors" },
   { path: "/book-appointment", icon: "📅", label: "Appointments" },
   { path: "/test-results", icon: "🧪", label: "Test Results" },
   { path: "/account", icon: "👤", label: "Account" },
