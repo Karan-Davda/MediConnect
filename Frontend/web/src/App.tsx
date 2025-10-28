@@ -6,6 +6,7 @@ import PatientRegisterStep1 from './pages/PatientRegisterStep1'
 import PatientRegisterStep2 from './pages/PatientRegisterStep2'
 import ProviderRegister from './pages/ProviderRegister'
 import BookAppointment from './pages/BookAppointment'
+import AccessControl from './pages/AccessControl'
 import './App.css'
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
       <Route path="/register/patient/step2" element={<PatientRegisterStep2 />} />
       <Route path="/register/provider" element={<ProviderRegister />} />
       <Route path="/book-appointment" element={<BookAppointment />} />
+      <Route path="/access-control" element={<AccessControl />} />
     </Routes>
   )
 }

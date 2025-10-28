@@ -1,5 +1,7 @@
-import React, { useState, FormEvent } from 'react';
+import React, { useState } from 'react';
+import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import './Login.css';
 
 interface LoginFormData {
@@ -10,6 +12,7 @@ interface LoginFormData {
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [formData, setFormData] = useState<LoginFormData>({
     email: '',
     password: '',
@@ -48,16 +51,14 @@ const Login: React.FC = () => {
 
     setLoading(true);
 
-    setTimeout(() => {
-      console.log('Login Data:', {
-        email: formData.email,
-        password: formData.password,
-      });
-
-      alert('Login successful! (Demo mode)');
-      setLoading(false);
+    try {
+      await login(formData.email, formData.password);
       navigate('/home');
-    }, 600);
+    } catch (error: any) {
+      setErrors({ password: error.message || 'Login failed' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleChange = (field: keyof LoginFormData, value: string | boolean) => {

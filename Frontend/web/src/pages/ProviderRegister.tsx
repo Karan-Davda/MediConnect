@@ -1,4 +1,5 @@
-import React, { useState, FormEvent } from 'react';
+import React, { useState } from 'react';
+import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './ProviderRegister.css';
 
@@ -162,7 +163,7 @@ const ProviderRegister: React.FC = () => {
   };
 
   return (
-    <div className="auth-container">
+    <div className="auth-container has-registration">
       <div className="auth-card">
         <div className="auth-left">
           <div className="logo-section">
