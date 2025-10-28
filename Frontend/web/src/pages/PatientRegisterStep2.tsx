@@ -1,4 +1,5 @@
-import React, { useState, useEffect, FormEvent } from 'react';
+import React, { useState, useEffect } from 'react';
+import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { PatientStep1Data } from './PatientRegisterStep1';
 import './PatientRegister.css';
@@ -122,7 +123,7 @@ const PatientRegisterStep2: React.FC = () => {
   };
 
   return (
-    <div className="auth-container">
+    <div className="auth-container has-registration">
       <div className="auth-card">
         <div className="auth-left">
           <div className="logo-section">
