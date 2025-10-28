@@ -235,37 +235,44 @@ REMOTE
 
   // ---------------- POST ACTIONS ----------------
   post {
-    success {
-      echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed to ${env.TARGET_ENV}"
-      script {
-        try {
-          slackSend(
-            color: '#2EB67D',
-            message: "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
-                     "Env: *${env.TARGET_ENV}*\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n" +
-                     "*Message:* ${env.GIT_COMMIT_MSG}\n" +
-                     "<${env.BUILD_URL}|View Console Output>"
-          )
-        } catch (e) { echo "Slack not configured: ${e.message}" }
+  success {
+    echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed to ${env.TARGET_ENV}"
+    script {
+      try {
+        slackSend(
+          color: '#2EB67D',
+          message: "*${env.GIT_COMMIT_MSG}*\n" +  // Commit message on top
+                   "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
+                   "Branch: *${env.BRANCH_NAME}*\n" +
+                   "Commit: `${env.GIT_COMMIT_SHORT}`"
+        )
+      } catch (e) {
+        echo "Slack not configured: ${e.message}"
       }
-    }
-    failure {
-      echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed (env=${env.TARGET_ENV})"
-      script {
-        try {
-          slackSend(
-            color: '#E01E5A',
-            message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
-                     "Env: *${env.TARGET_ENV ?: 'N/A'}*\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n" +
-                     "*Message:* ${env.GIT_COMMIT_MSG}\n" +
-                     "<${env.BUILD_URL}console|View Console Output>"
-          )
-        } catch (e) { echo "Slack not configured: ${e.message}" }
-      }
-    }
-    always {
-      archiveArtifacts allowEmptyArchive: true, artifacts: "build_out.env,backend.tgz,**/dist/**"
-      echo "Build URL: ${env.BUILD_URL}"
     }
   }
+
+  failure {
+    echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed (env=${env.TARGET_ENV})"
+    script {
+      try {
+        slackSend(
+          color: '#E01E5A',
+          message: "*${env.GIT_COMMIT_MSG}*\n" +
+                   "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
+                   "Branch: *${env.BRANCH_NAME}*\n" +
+                   "Commit: `${env.GIT_COMMIT_SHORT}`"
+        )
+      } catch (e) {
+        echo "Slack not configured: ${e.message}"
+      }
+    }
+  }
+
+  always {
+    archiveArtifacts allowEmptyArchive: true, artifacts: "build_out.env,backend.tgz,**/dist/**"
+    echo "Build URL: ${env.BUILD_URL}"
+  }
+}
+
 }
