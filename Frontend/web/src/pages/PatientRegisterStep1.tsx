@@ -28,8 +28,10 @@ const PatientRegisterStep1: React.FC = () => {
 
   const validatePassword = (password: string): boolean => {
     if (password.length < 8) return false;
-    if (!/[a-zA-Z]/.test(password)) return false;
+    if (!/[A-Z]/.test(password)) return false;
+    if (!/[a-z]/.test(password)) return false;
     if (!/\d/.test(password)) return false;
+    if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) return false;
     return true;
   };
 
@@ -49,7 +51,7 @@ const PatientRegisterStep1: React.FC = () => {
     if (!formData.password) {
       newErrors.password = 'Password is required';
     } else if (!validatePassword(formData.password)) {
-      newErrors.password = 'Password must be at least 8 characters with at least 1 letter and 1 number';
+      newErrors.password = 'Password must be at least 8 characters with uppercase, lowercase, number, and special character';
     }
 
     if (!formData.confirmPassword) {

@@ -5,6 +5,7 @@ import type { PatientStep1Data } from './PatientRegisterStep1';
 import './PatientRegister.css';
 
 interface PatientStep2Data {
+  countryCode: string;
   phone: string;
   dob: string;
   country: string;
@@ -12,17 +13,53 @@ interface PatientStep2Data {
   city: string;
 }
 
+const COUNTRY_CODES = [
+  { code: '+1', country: 'US', name: 'United States', maxDigits: 10 },
+  { code: '+91', country: 'IN', name: 'India', maxDigits: 10 },
+  { code: '+44', country: 'GB', name: 'United Kingdom', maxDigits: 10 },
+  { code: '+61', country: 'AU', name: 'Australia', maxDigits: 9 },
+  { code: '+86', country: 'CN', name: 'China', maxDigits: 11 },
+];
+
+const US_STATES = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado',
+  'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho',
+  'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana',
+  'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota',
+  'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
+  'New Hampshire', 'New Jersey', 'New Mexico', 'New York',
+  'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon',
+  'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
+  'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington',
+  'West Virginia', 'Wisconsin', 'Wyoming'
+];
+
+const US_CITIES_BY_STATE: Record<string, string[]> = {
+  'California': ['Los Angeles', 'San Francisco', 'San Diego', 'San Jose', 'Sacramento', 'Fresno', 'Oakland'],
+  'New York': ['New York City', 'Buffalo', 'Rochester', 'Yonkers', 'Syracuse', 'Albany'],
+  'Texas': ['Houston', 'San Antonio', 'Dallas', 'Austin', 'Fort Worth', 'El Paso', 'Arlington'],
+  'Florida': ['Jacksonville', 'Miami', 'Tampa', 'Orlando', 'St. Petersburg', 'Tallahassee'],
+  'Illinois': ['Chicago', 'Aurora', 'Naperville', 'Joliet', 'Rockford', 'Springfield'],
+  'Pennsylvania': ['Philadelphia', 'Pittsburgh', 'Allentown', 'Erie', 'Reading', 'Scranton'],
+  'Ohio': ['Columbus', 'Cleveland', 'Cincinnati', 'Toledo', 'Akron', 'Dayton'],
+  'Georgia': ['Atlanta', 'Augusta', 'Columbus', 'Savannah', 'Athens', 'Macon'],
+  'North Carolina': ['Charlotte', 'Raleigh', 'Greensboro', 'Durham', 'Winston-Salem', 'Fayetteville'],
+  'Michigan': ['Detroit', 'Grand Rapids', 'Warren', 'Sterling Heights', 'Ann Arbor', 'Lansing'],
+};
+
 const PatientRegisterStep2: React.FC = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState<PatientStep2Data>({
+    countryCode: '+1',
     phone: '',
     dob: '',
-    country: '',
+    country: 'United States',
     state: '',
     city: '',
   });
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [loading, setLoading] = useState(false);
+  const [availableCities, setAvailableCities] = useState<string[]>([]);
 
   useEffect(() => {
     const step1Data = localStorage.getItem('patientStep1Data');
@@ -31,16 +68,44 @@ const PatientRegisterStep2: React.FC = () => {
     }
   }, [navigate]);
 
-  const validatePhone = (phone: string): boolean => {
-    const phoneRegex = /^\+?[\d\s\-()]+$/;
-    return phoneRegex.test(phone) && phone.replace(/\D/g, '').length >= 10;
+  useEffect(() => {
+    if (formData.state && US_CITIES_BY_STATE[formData.state]) {
+      setAvailableCities(US_CITIES_BY_STATE[formData.state]);
+      setFormData(prev => ({ ...prev, city: '' }));
+    } else {
+      setAvailableCities([]);
+    }
+  }, [formData.state]);
+
+  const validatePhone = (phone: string, countryCode: string): boolean => {
+    const country = COUNTRY_CODES.find(c => c.code === countryCode);
+    if (!country) return false;
+
+    const digits = phone.replace(/\D/g, '');
+    return digits.length === country.maxDigits;
   };
 
-  const validateDate = (dateStr: string): boolean => {
+  const validateDOB = (dateStr: string): boolean => {
+    if (!dateStr) return false;
+
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return false;
+
+    const year = parseInt(parts[0]);
+    if (year.toString().length !== 4) return false;
+    if (year < 1900 || year > new Date().getFullYear()) return false;
+
     const date = new Date(dateStr);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    return date < today;
+
+    if (isNaN(date.getTime())) return false;
+    if (date >= today) return false;
+
+    const age = today.getFullYear() - date.getFullYear();
+    if (age < 0 || age > 120) return false;
+
+    return true;
   };
 
   const validateForm = (): boolean => {
@@ -48,14 +113,15 @@ const PatientRegisterStep2: React.FC = () => {
 
     if (!formData.phone.trim()) {
       newErrors.phone = 'Phone number is required';
-    } else if (!validatePhone(formData.phone)) {
-      newErrors.phone = 'Please enter a valid phone number (at least 10 digits)';
+    } else if (!validatePhone(formData.phone, formData.countryCode)) {
+      const country = COUNTRY_CODES.find(c => c.code === formData.countryCode);
+      newErrors.phone = `Please enter a valid ${country?.name} phone number (${country?.maxDigits} digits)`;
     }
 
     if (!formData.dob) {
       newErrors.dob = 'Date of birth is required';
-    } else if (!validateDate(formData.dob)) {
-      newErrors.dob = 'Date of birth cannot be in the future';
+    } else if (!validateDOB(formData.dob)) {
+      newErrors.dob = 'Please enter a valid date of birth';
     }
 
     if (!formData.country.trim()) {
@@ -98,7 +164,7 @@ const PatientRegisterStep2: React.FC = () => {
         },
         profile: {
           full_name: step1Data.fullName,
-          phone: formData.phone,
+          phone: formData.countryCode + formData.phone,
           dob: formData.dob,
           country: formData.country,
           state: formData.state,
@@ -107,7 +173,7 @@ const PatientRegisterStep2: React.FC = () => {
       };
 
       console.log('Patient Registration Payload:', payload);
-      alert('Registration successful! (Demo mode)\n\n' + JSON.stringify(payload, null, 2));
+      alert('Registration successful! You can now log in.');
 
       localStorage.removeItem('patientStep1Data');
       setLoading(false);
@@ -121,6 +187,17 @@ const PatientRegisterStep2: React.FC = () => {
       setErrors(prev => ({ ...prev, [field]: '' }));
     }
   };
+
+  const handlePhoneChange = (value: string) => {
+    const digits = value.replace(/\D/g, '');
+    const country = COUNTRY_CODES.find(c => c.code === formData.countryCode);
+    if (country && digits.length <= country.maxDigits) {
+      handleChange('phone', digits);
+    }
+  };
+
+  const maxDate = new Date().toISOString().split('T')[0];
+  const minDate = new Date(1900, 0, 1).toISOString().split('T')[0];
 
   return (
     <div className="auth-container has-registration">
@@ -140,15 +217,33 @@ const PatientRegisterStep2: React.FC = () => {
             <form onSubmit={handleSubmit} noValidate>
               <div className="form-group">
                 <label htmlFor="phone">Phone Number</label>
-                <input
-                  type="tel"
-                  id="phone"
-                  className={`form-input ${errors.phone ? 'error' : ''}`}
-                  value={formData.phone}
-                  onChange={(e) => handleChange('phone', e.target.value)}
-                  placeholder="+1 (555) 123-4567"
-                  required
-                />
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <select
+                    value={formData.countryCode}
+                    onChange={(e) => {
+                      handleChange('countryCode', e.target.value);
+                      handleChange('phone', '');
+                    }}
+                    style={{ width: '100px' }}
+                    className="form-input"
+                  >
+                    {COUNTRY_CODES.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.code}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="tel"
+                    id="phone"
+                    className={`form-input ${errors.phone ? 'error' : ''}`}
+                    value={formData.phone}
+                    onChange={(e) => handlePhoneChange(e.target.value)}
+                    placeholder={`${COUNTRY_CODES.find(c => c.code === formData.countryCode)?.maxDigits} digits`}
+                    required
+                    style={{ flex: 1 }}
+                  />
+                </div>
                 {errors.phone && <span className="error-message">{errors.phone}</span>}
               </div>
 
@@ -160,6 +255,8 @@ const PatientRegisterStep2: React.FC = () => {
                   className={`form-input ${errors.dob ? 'error' : ''}`}
                   value={formData.dob}
                   onChange={(e) => handleChange('dob', e.target.value)}
+                  max={maxDate}
+                  min={minDate}
                   required
                 />
                 {errors.dob && <span className="error-message">{errors.dob}</span>}
@@ -167,47 +264,113 @@ const PatientRegisterStep2: React.FC = () => {
 
               <div className="form-group">
                 <label htmlFor="country">Country</label>
-                <input
-                  type="text"
+                <select
                   id="country"
                   className={`form-input ${errors.country ? 'error' : ''}`}
                   value={formData.country}
-                  onChange={(e) => handleChange('country', e.target.value)}
-                  placeholder="United States"
+                  onChange={(e) => {
+                    handleChange('country', e.target.value);
+                    handleChange('state', '');
+                    handleChange('city', '');
+                  }}
                   required
-                />
+                >
+                  <option value="United States">United States</option>
+                  <option value="India">India</option>
+                  <option value="United Kingdom">United Kingdom</option>
+                  <option value="Australia">Australia</option>
+                  <option value="China">China</option>
+                </select>
                 {errors.country && <span className="error-message">{errors.country}</span>}
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="state">State</label>
-                  <input
-                    type="text"
-                    id="state"
-                    className={`form-input ${errors.state ? 'error' : ''}`}
-                    value={formData.state}
-                    onChange={(e) => handleChange('state', e.target.value)}
-                    placeholder="California"
-                    required
-                  />
-                  {errors.state && <span className="error-message">{errors.state}</span>}
-                </div>
+              {formData.country === 'United States' && (
+                <>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label htmlFor="state">State</label>
+                      <select
+                        id="state"
+                        className={`form-input ${errors.state ? 'error' : ''}`}
+                        value={formData.state}
+                        onChange={(e) => handleChange('state', e.target.value)}
+                        required
+                      >
+                        <option value="">Select State</option>
+                        {US_STATES.map((state) => (
+                          <option key={state} value={state}>
+                            {state}
+                          </option>
+                        ))}
+                      </select>
+                      {errors.state && <span className="error-message">{errors.state}</span>}
+                    </div>
 
-                <div className="form-group">
-                  <label htmlFor="city">City</label>
-                  <input
-                    type="text"
-                    id="city"
-                    className={`form-input ${errors.city ? 'error' : ''}`}
-                    value={formData.city}
-                    onChange={(e) => handleChange('city', e.target.value)}
-                    placeholder="Los Angeles"
-                    required
-                  />
-                  {errors.city && <span className="error-message">{errors.city}</span>}
+                    <div className="form-group">
+                      <label htmlFor="city">City</label>
+                      {availableCities.length > 0 ? (
+                        <select
+                          id="city"
+                          className={`form-input ${errors.city ? 'error' : ''}`}
+                          value={formData.city}
+                          onChange={(e) => handleChange('city', e.target.value)}
+                          required
+                        >
+                          <option value="">Select City</option>
+                          {availableCities.map((city) => (
+                            <option key={city} value={city}>
+                              {city}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          id="city"
+                          className={`form-input ${errors.city ? 'error' : ''}`}
+                          value={formData.city}
+                          onChange={(e) => handleChange('city', e.target.value)}
+                          placeholder="Enter your city"
+                          required
+                        />
+                      )}
+                      {errors.city && <span className="error-message">{errors.city}</span>}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {formData.country !== 'United States' && (
+                <div className="form-row">
+                  <div className="form-group">
+                    <label htmlFor="state">State/Province</label>
+                    <input
+                      type="text"
+                      id="state"
+                      className={`form-input ${errors.state ? 'error' : ''}`}
+                      value={formData.state}
+                      onChange={(e) => handleChange('state', e.target.value)}
+                      placeholder="Enter your state"
+                      required
+                    />
+                    {errors.state && <span className="error-message">{errors.state}</span>}
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="city">City</label>
+                    <input
+                      type="text"
+                      id="city"
+                      className={`form-input ${errors.city ? 'error' : ''}`}
+                      value={formData.city}
+                      onChange={(e) => handleChange('city', e.target.value)}
+                      placeholder="Enter your city"
+                      required
+                    />
+                    {errors.city && <span className="error-message">{errors.city}</span>}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <button type="submit" className="btn-primary" disabled={loading}>
                 {loading ? 'Creating account...' : 'Sign Up'}
