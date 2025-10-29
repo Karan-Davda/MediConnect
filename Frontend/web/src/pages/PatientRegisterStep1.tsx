@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import './PatientRegister.css';
 
 export interface PatientStep1Data {
@@ -69,7 +69,14 @@ const PatientRegisterStep1: React.FC = () => {
 
     if (!validateForm()) return;
 
-    localStorage.setItem('patientStep1Data', JSON.stringify(formData));
+    // Sanitize data before storing
+    const sanitizedData = {
+      ...formData,
+      fullName: formData.fullName.trim(),
+      email: formData.email.trim().toLowerCase(),
+    };
+
+    localStorage.setItem('patientStep1Data', JSON.stringify(sanitizedData));
     navigate('/register/patient/step2');
   };
 
@@ -132,6 +139,9 @@ const PatientRegisterStep1: React.FC = () => {
                   onChange={(e) => handleChange('password', e.target.value)}
                   required
                 />
+                <small style={{ display: 'block', marginTop: '4px', color: '#718096', fontSize: '0.85rem' }}>
+                  Must be at least 8 characters with uppercase, lowercase, number, and special character
+                </small>
                 {errors.password && <span className="error-message">{errors.password}</span>}
               </div>
 
@@ -168,11 +178,11 @@ const PatientRegisterStep1: React.FC = () => {
 
               <p className="auth-link">
                 Are you a doctor or clinic admin?{' '}
-                <a onClick={() => navigate('/register/provider')}>Sign up here</a>
+                <Link to="/register/provider">Sign up here</Link>
               </p>
 
               <p className="auth-link">
-                Already have an account? <a onClick={() => navigate('/login')}>Login</a>
+                Already have an account? <Link to="/login">Login</Link>
               </p>
             </form>
           </div>

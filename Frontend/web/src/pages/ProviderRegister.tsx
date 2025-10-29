@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import './ProviderRegister.css';
 
 interface ProviderFormData {
@@ -16,6 +16,46 @@ interface ProviderFormData {
   city: string;
   specialty: string;
 }
+
+// ISO 3166-1 Countries (common subset)
+const COUNTRIES = [
+  { code: 'US', name: 'United States' },
+  { code: 'CA', name: 'Canada' },
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'AU', name: 'Australia' },
+  { code: 'IN', name: 'India' },
+  { code: 'DE', name: 'Germany' },
+  { code: 'FR', name: 'France' },
+  { code: 'JP', name: 'Japan' },
+  { code: 'CN', name: 'China' },
+  { code: 'BR', name: 'Brazil' },
+];
+
+// US States (ISO 3166-2:US)
+const US_STATES = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado',
+  'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho',
+  'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana',
+  'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota',
+  'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
+  'New Hampshire', 'New Jersey', 'New Mexico', 'New York',
+  'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon',
+  'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
+  'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington',
+  'West Virginia', 'Wisconsin', 'Wyoming'
+];
+
+// Canadian Provinces
+const CA_PROVINCES = [
+  'Alberta', 'British Columbia', 'Manitoba', 'New Brunswick',
+  'Newfoundland and Labrador', 'Nova Scotia', 'Ontario',
+  'Prince Edward Island', 'Quebec', 'Saskatchewan'
+];
+
+const STATES_BY_COUNTRY: Record<string, string[]> = {
+  'US': US_STATES,
+  'CA': CA_PROVINCES,
+};
 
 const ProviderRegister: React.FC = () => {
   const navigate = useNavigate();
@@ -35,6 +75,22 @@ const ProviderRegister: React.FC = () => {
   const [showPasswords, setShowPasswords] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [loading, setLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string>('');
+  const [availableStates, setAvailableStates] = useState<string[]>([]);
+
+  // Update available states when country changes
+  useEffect(() => {
+    const selectedCountry = COUNTRIES.find(c => c.name === formData.country);
+    if (selectedCountry && STATES_BY_COUNTRY[selectedCountry.code]) {
+      setAvailableStates(STATES_BY_COUNTRY[selectedCountry.code]);
+      // Clear state if it's not valid for new country
+      if (formData.state && !STATES_BY_COUNTRY[selectedCountry.code].includes(formData.state)) {
+        setFormData(prev => ({ ...prev, state: '' }));
+      }
+    } else {
+      setAvailableStates([]);
+    }
+  }, [formData.country]);
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -53,6 +109,23 @@ const ProviderRegister: React.FC = () => {
   const validatePhone = (phone: string): boolean => {
     const phoneRegex = /^\+?[\d\s\-()]+$/;
     return phoneRegex.test(phone) && phone.replace(/\D/g, '').length >= 10;
+  };
+
+  const validateCity = (city: string): boolean => {
+    if (!city || city.length < 2 || city.length > 85) return false;
+
+    // Allow letters, spaces, hyphens, apostrophes, and diacritics
+    // Reject numeric-only and symbol-only values
+    const cityRegex = /^[a-zA-ZÀ-ÿ\s'\-]+$/;
+    if (!cityRegex.test(city)) return false;
+
+    // Reject if only numbers
+    if (/^\d+$/.test(city)) return false;
+
+    // Reject if only symbols
+    if (/^[^a-zA-ZÀ-ÿ0-9]+$/.test(city)) return false;
+
+    return true;
   };
 
   const validateForm = (): boolean => {
@@ -92,14 +165,25 @@ const ProviderRegister: React.FC = () => {
 
     if (!formData.country.trim()) {
       newErrors.country = 'Country is required';
+    } else if (!COUNTRIES.find(c => c.name === formData.country)) {
+      newErrors.country = 'Please select a valid country from the list';
     }
 
     if (!formData.state.trim()) {
       newErrors.state = 'State is required';
+    } else {
+      const selectedCountry = COUNTRIES.find(c => c.name === formData.country);
+      if (selectedCountry && STATES_BY_COUNTRY[selectedCountry.code]) {
+        if (!STATES_BY_COUNTRY[selectedCountry.code].includes(formData.state)) {
+          newErrors.state = 'Please select a valid state for the chosen country';
+        }
+      }
     }
 
     if (!formData.city.trim()) {
       newErrors.city = 'City is required';
+    } else if (!validateCity(formData.city)) {
+      newErrors.city = 'City must be 2-85 characters, contain letters, and cannot be numbers or symbols only';
     }
 
     if (formData.role === 'doctor' && !formData.specialty.trim()) {
@@ -116,40 +200,60 @@ const ProviderRegister: React.FC = () => {
     if (!validateForm()) return;
 
     setLoading(true);
+    setErrors({});
+    setSuccessMessage('');
 
-    setTimeout(() => {
+    try {
       const profile: any = {
-        full_name: formData.fullName,
-        phone: formData.phone,
-        country: formData.country,
-        state: formData.state,
-        city: formData.city,
+        full_name: formData.fullName.trim(),
+        phone: formData.phone.trim(),
+        country: formData.country.trim(),
+        state: formData.state.trim(),
+        city: formData.city.trim(),
       };
 
       if (formData.role === 'clinic_admin') {
-        profile.clinic_name = formData.clinicName;
+        profile.clinic_name = formData.clinicName.trim();
       } else {
-        profile.specialty = formData.specialty;
+        profile.specialty = formData.specialty.trim();
       }
 
       const payload = {
         role: formData.role,
         auth: {
-          email: formData.email,
+          email: formData.email.trim().toLowerCase(),
           password: formData.password,
         },
         profile,
       };
 
-      console.log('Provider Registration Payload:', payload);
-      alert(
-        `${formData.role === 'clinic_admin' ? 'Clinic Admin' : 'Doctor'} Registration successful! (Demo mode)\n\n` +
-          JSON.stringify(payload, null, 2)
-      );
+      const response = await fetch('http://localhost:3001/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Registration failed');
+      }
+
+      const data = await response.json();
+      console.log('Registration successful:', data);
+
+      setSuccessMessage('Registration successful! Redirecting to login...');
+
+      setTimeout(() => {
+        navigate('/login');
+      }, 2000);
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      setErrors({ submit: error.message || 'Registration failed. Please try again.' });
+    } finally {
       setLoading(false);
-      navigate('/login');
-    }, 600);
+    }
   };
 
   const handleChange = (field: keyof ProviderFormData, value: string) => {
@@ -177,6 +281,18 @@ const ProviderRegister: React.FC = () => {
         <div className="auth-right">
           <div className="auth-form-container">
             <h2>Provider Registration</h2>
+
+            {successMessage && (
+              <div style={{ padding: '12px', backgroundColor: '#c6f6d5', color: '#22543d', borderRadius: '8px', marginBottom: '1rem' }}>
+                {successMessage}
+              </div>
+            )}
+
+            {errors.submit && (
+              <div style={{ padding: '12px', backgroundColor: '#fed7d7', color: '#742a2a', borderRadius: '8px', marginBottom: '1rem' }}>
+                {errors.submit}
+              </div>
+            )}
 
             <div className="toggle-container">
               <p className="toggle-label">Select your role:</p>
@@ -255,6 +371,9 @@ const ProviderRegister: React.FC = () => {
                   onChange={(e) => handleChange('password', e.target.value)}
                   required
                 />
+                <small style={{ display: 'block', marginTop: '4px', color: '#718096', fontSize: '0.85rem' }}>
+                  Must be at least 8 characters with uppercase, lowercase, number, and special character
+                </small>
                 {errors.password && <span className="error-message">{errors.password}</span>}
               </div>
 
@@ -287,30 +406,52 @@ const ProviderRegister: React.FC = () => {
 
               <div className="form-group">
                 <label htmlFor="country">Country</label>
-                <input
-                  type="text"
+                <select
                   id="country"
                   className={`form-input ${errors.country ? 'error' : ''}`}
                   value={formData.country}
                   onChange={(e) => handleChange('country', e.target.value)}
-                  placeholder="United States"
                   required
-                />
+                >
+                  <option value="">Select a country</option>
+                  {COUNTRIES.map(country => (
+                    <option key={country.code} value={country.name}>
+                      {country.name}
+                    </option>
+                  ))}
+                </select>
                 {errors.country && <span className="error-message">{errors.country}</span>}
               </div>
 
               <div className="form-row">
                 <div className="form-group">
-                  <label htmlFor="state">State</label>
-                  <input
-                    type="text"
-                    id="state"
-                    className={`form-input ${errors.state ? 'error' : ''}`}
-                    value={formData.state}
-                    onChange={(e) => handleChange('state', e.target.value)}
-                    placeholder="California"
-                    required
-                  />
+                  <label htmlFor="state">State/Province</label>
+                  {availableStates.length > 0 ? (
+                    <select
+                      id="state"
+                      className={`form-input ${errors.state ? 'error' : ''}`}
+                      value={formData.state}
+                      onChange={(e) => handleChange('state', e.target.value)}
+                      required
+                    >
+                      <option value="">Select a state</option>
+                      {availableStates.map(state => (
+                        <option key={state} value={state}>
+                          {state}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      id="state"
+                      className={`form-input ${errors.state ? 'error' : ''}`}
+                      value={formData.state}
+                      onChange={(e) => handleChange('state', e.target.value)}
+                      placeholder="Enter state/province"
+                      required
+                    />
+                  )}
                   {errors.state && <span className="error-message">{errors.state}</span>}
                 </div>
 
@@ -322,9 +463,12 @@ const ProviderRegister: React.FC = () => {
                     className={`form-input ${errors.city ? 'error' : ''}`}
                     value={formData.city}
                     onChange={(e) => handleChange('city', e.target.value)}
-                    placeholder="Los Angeles"
+                    placeholder="e.g., Los Angeles, São Paulo, Łódź"
                     required
                   />
+                  <small style={{ display: 'block', marginTop: '4px', color: '#718096', fontSize: '0.85rem' }}>
+                    2-85 characters, letters only (diacritics allowed)
+                  </small>
                   {errors.city && <span className="error-message">{errors.city}</span>}
                 </div>
               </div>
@@ -364,11 +508,11 @@ const ProviderRegister: React.FC = () => {
               </div>
 
               <p className="auth-link">
-                Are you a patient? <a onClick={() => navigate('/register/patient/step1')}>Sign up here</a>
+                Are you a patient? <Link to="/register/patient/step1">Sign up here</Link>
               </p>
 
               <p className="auth-link">
-                Already have an account? <a onClick={() => navigate('/login')}>Login</a>
+                Already have an account? <Link to="/login">Login</Link>
               </p>
             </form>
           </div>

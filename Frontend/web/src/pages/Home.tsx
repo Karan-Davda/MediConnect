@@ -1,21 +1,12 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
-import { useAuth } from '../context/AuthContext';
 import './Home.css';
 
 const Home: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { isAuthenticated, logout } = useAuth();
-  const navigate = useNavigate();
 
   const toggleSidebar = () => {
     setSidebarCollapsed(!sidebarCollapsed);
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
   };
 
   return (
@@ -40,11 +31,7 @@ const Home: React.FC = () => {
             </div>
           </div>
           <div className="header-right">
-            {isAuthenticated ? (
-              <button onClick={handleLogout} className="login-btn">Logout</button>
-            ) : (
-              <Link to="/login" className="login-btn">Login</Link>
-            )}
+            {/* Login/Logout moved to Sidebar */}
           </div>
         </header>
 

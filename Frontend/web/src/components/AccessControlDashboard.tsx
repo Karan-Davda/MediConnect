@@ -201,7 +201,7 @@ const AccessControlDashboard: React.FC = () => {
             </button>
           </div>
           {activeTab === 'users' && (
-            <button className="btn-primary" onClick={() => setShowAddUserModal(true)}>Add User</button>
+            <button className="btn-primary btn-add-user" onClick={() => setShowAddUserModal(true)}>Add User</button>
           )}
         </div>
 
@@ -235,7 +235,7 @@ const AccessControlDashboard: React.FC = () => {
                     </div>
 
                     <div className="user-actions">
-                      <button onClick={() => setSelectedUser(user)}>
+                      <button className='btn-secondary' onClick={() => setSelectedUser(user)}>
                         View Details
                       </button>
                       <button className="btn-secondary">

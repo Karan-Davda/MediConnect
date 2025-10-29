@@ -115,6 +115,10 @@ body, html {
   text-decoration: none;
   font-weight: 600;
   transition: background-color 0.3s;
+  border: none;
+  font-size: 1rem;
+  display: inline-block;
+  line-height: 1.5;
 }
 
 .login-btn:hover {
@@ -362,9 +366,12 @@ body, html {
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 0.5rem 0.75rem;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.3s;
+  color: #2d3748;
+  line-height: 1.5;
 }
 
 .action-btn:hover {
