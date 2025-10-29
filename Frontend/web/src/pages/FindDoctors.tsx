@@ -219,6 +219,12 @@ const FindDoctors: React.FC = () => {
               onClick={handleClearFilters}
               style={{
                 backgroundColor: "#a0aec0",
+                color: "white",
+                border: "none",
+                padding: "0.75rem 1.5rem",
+                borderRadius: "8px",
+                fontSize: "1rem",
+                fontWeight: "600",
                 marginTop: "1rem",
               }}
             >
@@ -320,7 +326,12 @@ const FindDoctors: React.FC = () => {
                           onClick={() => handleBookAppointment(doctor.id)}
                           style={{
                             backgroundColor: "#667eea",
-                            padding: "0.5rem 1rem",
+                            color: "white",
+                            border: "none",
+                            padding: "0.75rem 1.25rem",
+                            borderRadius: "8px",
+                            fontSize: "0.95rem",
+                            fontWeight: "600",
                           }}
                         >
                           Book Appointment

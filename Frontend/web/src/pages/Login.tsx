@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import './Login.css';
 
@@ -52,7 +52,16 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      await login(formData.email, formData.password);
+      // Trim email before sending to API
+      await login(formData.email.trim(), formData.password);
+
+      // Handle remember me functionality
+      if (formData.rememberMe) {
+        localStorage.setItem('rememberMe', 'true');
+      } else {
+        localStorage.removeItem('rememberMe');
+      }
+
       navigate('/home');
     } catch (error: any) {
       setErrors({ password: error.message || 'Login failed' });
@@ -135,7 +144,11 @@ const Login: React.FC = () => {
 
               <p className="auth-link">
                 Don't have an account?{' '}
-                <a onClick={() => navigate('/register/patient/step1')}>Sign up</a>
+                <Link to="/register/patient/step1">Sign up</Link>
+              </p>
+
+              <p className="auth-link">
+                <Link to="/forgot-password">Forgot password?</Link>
               </p>
             </form>
           </div>

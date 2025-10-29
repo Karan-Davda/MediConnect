@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import type { PatientStep1Data } from './PatientRegisterStep1';
 import './PatientRegister.css';
 
@@ -60,6 +60,7 @@ const PatientRegisterStep2: React.FC = () => {
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [loading, setLoading] = useState(false);
   const [availableCities, setAvailableCities] = useState<string[]>([]);
+  const [successMessage, setSuccessMessage] = useState<string>('');
 
   useEffect(() => {
     const step1Data = localStorage.getItem('patientStep1Data');
@@ -108,6 +109,23 @@ const PatientRegisterStep2: React.FC = () => {
     return true;
   };
 
+  const validateCity = (city: string): boolean => {
+    if (!city || city.length < 2 || city.length > 85) return false;
+
+    // Allow letters, spaces, hyphens, apostrophes, and diacritics
+    // Reject numeric-only and symbol-only values
+    const cityRegex = /^[a-zA-ZÀ-ÿ\s'\-]+$/;
+    if (!cityRegex.test(city)) return false;
+
+    // Reject if only numbers
+    if (/^\d+$/.test(city)) return false;
+
+    // Reject if only symbols
+    if (/^[^a-zA-ZÀ-ÿ0-9]+$/.test(city)) return false;
+
+    return true;
+  };
+
   const validateForm = (): boolean => {
     const newErrors: { [key: string]: string } = {};
 
@@ -134,6 +152,8 @@ const PatientRegisterStep2: React.FC = () => {
 
     if (!formData.city.trim()) {
       newErrors.city = 'City is required';
+    } else if (!validateCity(formData.city)) {
+      newErrors.city = 'City must be 2-85 characters, contain letters, and cannot be numbers or symbols only';
     }
 
     setErrors(newErrors);
@@ -154,8 +174,10 @@ const PatientRegisterStep2: React.FC = () => {
     const step1Data: PatientStep1Data = JSON.parse(step1DataStr);
 
     setLoading(true);
+    setErrors({});
+    setSuccessMessage('');
 
-    setTimeout(() => {
+    try {
       const payload = {
         role: 'patient',
         auth: {
@@ -164,21 +186,42 @@ const PatientRegisterStep2: React.FC = () => {
         },
         profile: {
           full_name: step1Data.fullName,
-          phone: formData.countryCode + formData.phone,
+          phone: formData.countryCode + formData.phone.trim(),
           dob: formData.dob,
-          country: formData.country,
-          state: formData.state,
-          city: formData.city,
+          country: formData.country.trim(),
+          state: formData.state.trim(),
+          city: formData.city.trim(),
         },
       };
 
-      console.log('Patient Registration Payload:', payload);
-      alert('Registration successful! You can now log in.');
+      const response = await fetch('http://localhost:3001/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Registration failed');
+      }
+
+      const data = await response.json();
+      console.log('Registration successful:', data);
+
+      setSuccessMessage('Registration successful! Redirecting to login...');
       localStorage.removeItem('patientStep1Data');
+
+      setTimeout(() => {
+        navigate('/login');
+      }, 2000);
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      setErrors({ submit: error.message || 'Registration failed. Please try again.' });
+    } finally {
       setLoading(false);
-      navigate('/login');
-    }, 600);
+    }
   };
 
   const handleChange = (field: keyof PatientStep2Data, value: string) => {
@@ -213,6 +256,18 @@ const PatientRegisterStep2: React.FC = () => {
           <div className="auth-form-container">
             <h2>Patient Registration</h2>
             <p className="step-info">Step 2 of 2 - Personal Details</p>
+
+            {successMessage && (
+              <div style={{ padding: '12px', backgroundColor: '#c6f6d5', color: '#22543d', borderRadius: '8px', marginBottom: '1rem' }}>
+                {successMessage}
+              </div>
+            )}
+
+            {errors.submit && (
+              <div style={{ padding: '12px', backgroundColor: '#fed7d7', color: '#742a2a', borderRadius: '8px', marginBottom: '1rem' }}>
+                {errors.submit}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} noValidate>
               <div className="form-group">
@@ -324,15 +379,20 @@ const PatientRegisterStep2: React.FC = () => {
                           ))}
                         </select>
                       ) : (
-                        <input
-                          type="text"
-                          id="city"
-                          className={`form-input ${errors.city ? 'error' : ''}`}
-                          value={formData.city}
-                          onChange={(e) => handleChange('city', e.target.value)}
-                          placeholder="Enter your city"
-                          required
-                        />
+                        <>
+                          <input
+                            type="text"
+                            id="city"
+                            className={`form-input ${errors.city ? 'error' : ''}`}
+                            value={formData.city}
+                            onChange={(e) => handleChange('city', e.target.value)}
+                            placeholder="e.g., Los Angeles, São Paulo, Łódź"
+                            required
+                          />
+                          <small style={{ display: 'block', marginTop: '4px', color: '#718096', fontSize: '0.85rem' }}>
+                            2-85 characters, letters only (diacritics allowed)
+                          </small>
+                        </>
                       )}
                       {errors.city && <span className="error-message">{errors.city}</span>}
                     </div>
@@ -364,9 +424,12 @@ const PatientRegisterStep2: React.FC = () => {
                       className={`form-input ${errors.city ? 'error' : ''}`}
                       value={formData.city}
                       onChange={(e) => handleChange('city', e.target.value)}
-                      placeholder="Enter your city"
+                      placeholder="e.g., Los Angeles, São Paulo, Łódź"
                       required
                     />
+                    <small style={{ display: 'block', marginTop: '4px', color: '#718096', fontSize: '0.85rem' }}>
+                      2-85 characters, letters only (diacritics allowed)
+                    </small>
                     {errors.city && <span className="error-message">{errors.city}</span>}
                   </div>
                 </div>
@@ -382,11 +445,11 @@ const PatientRegisterStep2: React.FC = () => {
 
               <p className="auth-link">
                 Are you a doctor or clinic admin?{' '}
-                <a onClick={() => navigate('/register/provider')}>Sign up here</a>
+                <Link to="/register/provider">Sign up here</Link>
               </p>
 
               <p className="auth-link">
-                Already have an account? <a onClick={() => navigate('/login')}>Login</a>
+                Already have an account? <Link to="/login">Login</Link>
               </p>
             </form>
           </div>
