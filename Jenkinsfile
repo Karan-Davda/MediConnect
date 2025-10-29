@@ -20,16 +20,11 @@ pipeline {
   }
 
   environment {
-    // --- repo layout ---
     FRONTEND_DIR  = 'Frontend/web'
     BACKEND_DIR   = 'Backend'
-
-    // --- SSH user for all EC2 boxes ---
     SSH_USER      = 'ubuntu'
-
-    // --- Node runtime on agent ---
     NODE_MAJOR    = '22'
-    // Will set: GIT_COMMIT_SHORT, TARGET_ENV, EC2_HOST, EC2_CRED, APP_DIR
+    // Will set later: GIT_COMMIT_SHORT, GIT_COMMIT_SUBJECT, GIT_COMMIT_MSG, TARGET_ENV, EC2_HOST, EC2_CRED, APP_DIR
   }
 
   stages {
@@ -38,8 +33,14 @@ pipeline {
       steps {
         checkout scm
         script {
-          env.GIT_COMMIT_SHORT = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+          env.GIT_COMMIT_SHORT   = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          // subject (single line)
+          env.GIT_COMMIT_SUBJECT = sh(script: 'git log -1 --pretty=%s',     returnStdout: true).trim()
+          // full body (sanitize control chars to be safe for Slack)
+          env.GIT_COMMIT_MSG     = sh(script: "git log -1 --pretty=%B | tr -d '\\000-\\031\\177'", returnStdout: true).trim()
+
           echo "Commit: ${env.GIT_COMMIT_SHORT}"
+          echo "Subject: ${env.GIT_COMMIT_SUBJECT}"
         }
       }
     }
@@ -126,20 +127,18 @@ fi
       }
     }
 
-    // ---------------- Env selection (Dev/QA) ----------------
     stage('Select Environment') {
       steps {
         script {
-          // EDIT these QA values to your real QA host + credential + webroot
           def CFG = [
             DEV: [ branch: 'main',
                    host:   'ec2-3-22-13-29.us-east-2.compute.amazonaws.com',
                    cred:   'aws-deploy-key',
                    webroot:'/var/www/mediconnect' ],
             QA : [ branch: 'QA',
-                   host:   'ec2-3-144-150-239.us-east-2.compute.amazonaws.com', // TODO change to QA host
-                   cred:   'aws-qa-key',                                      // TODO create Jenkins SSH cred
-                   webroot:'/var/www/mediconnect-qa' ]                        // TODO QA nginx root
+                   host:   'ec2-3-144-150-239.us-east-2.compute.amazonaws.com',
+                   cred:   'aws-qa-key',
+                   webroot:'/var/www/mediconnect-qa' ]
           ]
 
           def t = params.FORCE_ENV
@@ -162,7 +161,6 @@ fi
       }
     }
 
-    // ---------------- Deploy (runs for Dev or QA) ----------------
     stage('Deploy to AWS') {
       when {
         allOf {
@@ -176,7 +174,6 @@ fi
 set -euo pipefail
 source "$WORKSPACE/build_out.env"
 
-# Prepare a single archive to upload
 rm -f mediconnect-dist.zip mediconnect-dist.tar.gz || true
 if command -v zip >/dev/null 2>&1; then
   (cd "$BUILD_OUT" && zip -r "$WORKSPACE/mediconnect-dist.zip" .)
@@ -187,22 +184,17 @@ else
 fi
 ls -lh "$WORKSPACE/$ART"
 
-# Upload to /tmp on the instance
 scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/$ART" "$SSH_USER@$EC2_HOST:/tmp/$ART"
 
-# Pass APP_DIR into remote environment and run remote deploy
 APP_DIR_SAFE="${APP_DIR}"
 ssh -i "$KEYFILE" -o StrictHostKeyChecking=no "$SSH_USER@$EC2_HOST" "APP_DIR=\"$APP_DIR_SAFE\" bash -s" <<'REMOTE'
 set -euo pipefail
-
 ART_ZIP="/tmp/mediconnect-dist.zip"
 ART_TAR="/tmp/mediconnect-dist.tar.gz"
 
-# Install tools we may need
 sudo apt-get update -y >/dev/null 2>&1 || true
 sudo apt-get install -y unzip >/dev/null 2>&1 || true
 
-# Extract into a temp directory
 TMPD="$(mktemp -d /tmp/mediconnect.XXXX)"
 if [ -f "$ART_ZIP" ]; then
   sudo unzip -q "$ART_ZIP" -d "$TMPD"
@@ -210,7 +202,6 @@ else
   sudo tar -xzf "$ART_TAR" -C "$TMPD"
 fi
 
-# Atomic swap
 TS="$(date +%s)"
 if [ -d "$APP_DIR" ]; then
   sudo mv "$APP_DIR" "${APP_DIR}.bak.$TS"
@@ -218,15 +209,12 @@ fi
 sudo mkdir -p "$(dirname "$APP_DIR")"
 sudo mv "$TMPD" "$APP_DIR"
 
-# Permissions for nginx
 sudo chown -R www-data:www-data "$APP_DIR"
 sudo find "$APP_DIR" -type d -exec chmod 755 {} +
 sudo find "$APP_DIR" -type f -exec chmod 644 {} +
 
-# Reload nginx and clean up
 sudo systemctl reload nginx || true
 sudo rm -f "$ART_ZIP" "$ART_TAR" || true
-
 echo "✅ Deployed static frontend to $APP_DIR"
 REMOTE
 '''
@@ -242,7 +230,13 @@ REMOTE
         try {
           slackSend(
             color: '#2EB67D',
-            message: "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nEnv: *${env.TARGET_ENV}*\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}|View Console Output>"
+            message:
+              "*${env.GIT_COMMIT_SUBJECT}*\n" + // commit subject on top
+              "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
+              (env.TARGET_ENV ? "Env: *${env.TARGET_ENV}*\n" : "") +
+              "Branch: *${env.BRANCH_NAME}*\n" +
+              "Commit: `${env.GIT_COMMIT_SHORT}`\n" +
+              "<${env.BUILD_URL}|View Console Output>"
           )
         } catch (e) { echo "Slack not configured: ${e.message}" }
       }
@@ -253,7 +247,13 @@ REMOTE
         try {
           slackSend(
             color: '#E01E5A',
-            message: "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\nEnv: *${env.TARGET_ENV ?: 'N/A'}*\nBranch: *${env.BRANCH_NAME}*\nCommit: `${env.GIT_COMMIT_SHORT}`\n<${env.BUILD_URL}console|View Console Output>"
+            message:
+              "*${env.GIT_COMMIT_SUBJECT ?: 'Build failed'}*\n" +
+              "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
+              (env.TARGET_ENV ? "Env: *${env.TARGET_ENV}*\n" : "") +
+              "Branch: *${env.BRANCH_NAME}*\n" +
+              "Commit: `${env.GIT_COMMIT_SHORT}`\n" +
+              "<${env.BUILD_URL}console|View Console Output>"
           )
         } catch (e) { echo "Slack not configured: ${e.message}" }
       }

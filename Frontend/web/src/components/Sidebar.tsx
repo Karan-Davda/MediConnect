@@ -1,5 +1,6 @@
 import React from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 import "./Sidebar.css";
 
 interface SidebarProps {
@@ -17,6 +18,13 @@ const navItems = [
 ];
 
 const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSettingsClick = () => {
+    navigate('/access-control');
+  };
+
   return (
     <aside className={`sidebar ${isCollapsed ? "collapsed" : ""}`}>
       {/* Toggle button */}
@@ -47,6 +55,28 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
           ))}
         </ul>
       </nav>
+
+      {/* Settings and Auth Section */}
+      <div className="sidebar-footer">
+        {/* Settings Button */}
+        <button
+          className="settings-btn"
+          onClick={handleSettingsClick}
+          aria-label="Access Control Settings"
+          data-tooltip="Access Control"
+        >
+          <span className="settings-icon">⚙️</span>
+          <span className="settings-text">Settings</span>
+        </button>
+
+        {/* Login Button */}
+        {!isAuthenticated && (
+          <NavLink to="/login" className="auth-btn login-btn" data-tooltip="Login">
+            <span className="auth-icon">🔑</span>
+            <span className="auth-text">Login</span>
+          </NavLink>
+        )}
+      </div>
     </aside>
   );
 };

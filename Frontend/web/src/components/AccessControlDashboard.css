@@ -115,6 +115,12 @@
   font-weight: 500;
 }
 
+.btn-add-user {
+  width: 10% !important;
+  font-size: 0.8rem !important;
+  padding: auto !important;
+}
+
 .btn-primary:hover {
   background: #2563eb;
 }
