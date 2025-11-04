@@ -8,6 +8,7 @@ import ProviderRegister from './pages/ProviderRegister'
 import BookAppointment from './pages/BookAppointment'
 import FindDoctors from './pages/FindDoctors'
 import AccessControl from './pages/AccessControl'
+import ClinicOperations from './pages/ClinicOperations'
 import './App.css'
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
       <Route path="/book-appointment" element={<BookAppointment />} />
       <Route path="/find-doctors" element={<FindDoctors />} />
       <Route path="/access-control" element={<AccessControl />} />
+      <Route path="/clinic-operations" element={<ClinicOperations />} />
     </Routes>
   )
 }

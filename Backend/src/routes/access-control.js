@@ -1,13 +1,13 @@
 const express = require('express');
-const { authenticate, requireRole, users: getUsers } = require('../middleware/auth');
+const { authenticate, requireRole, users } = require('../middleware/auth');
 const { PERMISSIONS } = require('../models/Role');
 const { createAuditLog, getAuditLogs, AuditLog } = require('../models/AuditLog');
 const { logAccess, AUDIT_ACTIONS } = require('../middleware/auditLogger');
 const router = express.Router();
 
 // Helper to get users list
-const users = () => getUsers();
-let usersList = getUsers();
+
+let usersList = users;
 
 // Get all users (admin only)
 router.get('/users', authenticate, requireRole('clinic_admin', 'account_manager', 'customer_success'), async (req, res) => {
@@ -92,7 +92,7 @@ router.get('/users/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
     
-    const user = users().find(u => u.id === userId);
+    const user = usersList.find(u => u.id === userId);
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
