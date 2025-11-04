@@ -6,7 +6,7 @@ const { logAccess, AUDIT_ACTIONS } = require('../middleware/auditLogger');
 const router = express.Router();
 
 // Helper to get users list
-
+const getUsers = () => users;
 let usersList = users;
 
 // Get all users (admin only)
@@ -17,8 +17,9 @@ router.get('/users', authenticate, requireRole('clinic_admin', 'account_manager'
       details: 'Viewing all users'
     });
     
+    const currentUsersList = users;
     res.json({
-      users: usersList.map(u => ({
+      users: currentUsersList.map(u => ({
         id: u.id,
         email: u.email,
         name: u.name,
@@ -42,13 +43,14 @@ router.post('/users', authenticate, requireRole('clinic_admin', 'account_manager
     }
 
     // Check if user already exists
-    if (usersList.find(u => u.email === email)) {
+    const currentUsersList = users;
+    if (currentUsersList.find(u => u.email === email)) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
     // Create new user
     const newUser = {
-      id: String(usersList.length + 1),
+      id: String(currentUsersList.length + 1),
       email,
       password,
       name,
@@ -57,7 +59,9 @@ router.post('/users', authenticate, requireRole('clinic_admin', 'account_manager
       isActive: isActive !== undefined ? isActive : true
     };
 
-    usersList.push(newUser);
+    // Note: In a real database, this would be saved to DB
+    // For now, we're using in-memory storage which is read-only
+    // usersList.push(newUser);
 
     logAccess(req, AUDIT_ACTIONS.CREATE, {
       resourceType: 'USER',
@@ -92,7 +96,7 @@ router.get('/users/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
     
-    const user = usersList.find(u => u.id === userId);
+    const user = users.find(u => u.id === userId);
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
