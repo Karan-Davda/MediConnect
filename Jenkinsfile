@@ -261,17 +261,36 @@ export NVM_DIR="$HOME/.nvm"
 if [ ! -s "$NVM_DIR/nvm.sh" ]; then
   echo "📦 Installing NVM..."
   curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+  # Source NVM after installation
+  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 fi
-. "$NVM_DIR/nvm.sh"
-nvm use 22 >/dev/null 2>&1 || nvm install 22 >/dev/null 2>&1
+
+# Load NVM
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+[ -s "$HOME/.bashrc" ] && source "$HOME/.bashrc" || true
+
+# Install and use Node.js 22
+echo "📦 Setting up Node.js 22..."
+nvm install 22 >/dev/null 2>&1 || true
+nvm use 22 >/dev/null 2>&1 || true
+nvm alias default 22 >/dev/null 2>&1 || true
 
 # Verify Node.js and npm are available
-echo "🔍 Node.js version: $(node --version)"
-echo "🔍 npm version: $(npm --version)"
+if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+  echo "❌ Node.js/npm not found. Trying to reload environment..."
+  export PATH="$HOME/.nvm/versions/node/v22.*/bin:$PATH"
+  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+fi
+
+echo "🔍 Node.js version: $(node --version 2>&1 || echo 'not found')"
+echo "🔍 npm version: $(npm --version 2>&1 || echo 'not found')"
 
 # Install dependencies
 echo "📥 Installing backend dependencies..."
-npm install --production || npm install
+npm install --production || npm install || {
+  echo "❌ npm install failed. Trying with full path..."
+  "$HOME/.nvm/versions/node/$(nvm current 2>/dev/null || echo 'v22.0.0')/bin/npm" install --production || "$HOME/.nvm/versions/node/$(nvm current 2>/dev/null || echo 'v22.0.0')/bin/npm" install
+}
 
 # Install PM2 globally if not installed
 if ! command -v pm2 &> /dev/null; then
