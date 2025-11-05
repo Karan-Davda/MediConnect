@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/Sidebar';
+import { apiUrl } from '../config/api';
 import './MedicalRecords.css';
-
-const API_BASE = 'http://localhost:3000/api';
 
 interface Diagnosis {
   code: string;
@@ -112,7 +111,7 @@ const MedicalRecords: React.FC = () => {
       }
 
       setLoadingPatients(true);
-      const response = await fetch(`${API_BASE}/medical-records/patients`, {
+      const response = await fetch(apiUrl('medical-records/patients'), {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -142,8 +141,8 @@ const MedicalRecords: React.FC = () => {
     try {
       setLoading(true);
       const url = selectedPatient 
-        ? `${API_BASE}/medical-records/patient/${selectedPatient}`
-        : `${API_BASE}/medical-records`;
+        ? apiUrl(`medical-records/patient/${selectedPatient}`)
+        : apiUrl('medical-records');
       
       const response = await fetch(url, {
         headers: {
@@ -186,8 +185,8 @@ const MedicalRecords: React.FC = () => {
 
       const isEditing = editingRecordId !== null;
       const url = isEditing 
-        ? `${API_BASE}/medical-records/${editingRecordId}`
-        : `${API_BASE}/medical-records`;
+        ? apiUrl(`medical-records/${editingRecordId}`)
+        : apiUrl('medical-records');
       
       const method = isEditing ? 'PUT' : 'POST';
 

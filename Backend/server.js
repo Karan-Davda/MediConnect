@@ -13,7 +13,46 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // List of allowed origins
+    const allowedOrigins = [
+      process.env.CORS_ORIGIN || 'http://localhost:5173',
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'http://ec2-3-144-150-239.us-east-2.compute.amazonaws.com',
+      'http://ec2-3-22-13-29.us-east-2.compute.amazonaws.com',
+      // Allow any localhost with any port for development
+      /^http:\/\/localhost:\d+$/,
+      // Allow EC2 instances with any path
+      /^https?:\/\/ec2-[\d-]+\.us-east-2\.compute\.amazonaws\.com/,
+    ];
+    
+    // Check if origin is in allowed list or matches pattern
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (typeof allowed === 'string') {
+        return origin === allowed || origin.includes(allowed.replace('http://', '').replace('https://', ''));
+      }
+      if (allowed instanceof RegExp) {
+        return allowed.test(origin);
+      }
+      return false;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      // For development, allow all (remove in production)
+      if (process.env.NODE_ENV === 'development') {
+        callback(null, true);
+      } else {
+        console.warn(`CORS blocked origin: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    }
+  },
   credentials: true
 }));
 app.use(express.json());
