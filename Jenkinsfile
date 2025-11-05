@@ -261,15 +261,51 @@ if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
   echo "📦 Installing Node.js 22.x..."
   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
   sudo apt-get install -y nodejs
+  # Update PATH to include Node.js binaries
+  export PATH="/usr/bin:$PATH"
 fi
 
 # Verify Node.js and npm are available
-echo "🔍 Node.js version: $(node --version 2>&1)"
-echo "🔍 npm version: $(npm --version 2>&1)"
+if ! command -v node &> /dev/null; then
+  echo "❌ Node.js not found, checking common locations..."
+  if [ -f "/usr/bin/node" ]; then
+    export PATH="/usr/bin:$PATH"
+  elif [ -f "/usr/local/bin/node" ]; then
+    export PATH="/usr/local/bin:$PATH"
+  else
+    echo "❌ Node.js installation failed"
+    exit 1
+  fi
+fi
 
-# Install dependencies
+if ! command -v npm &> /dev/null; then
+  echo "❌ npm not found, checking common locations..."
+  if [ -f "/usr/bin/npm" ]; then
+    export PATH="/usr/bin:$PATH"
+  elif [ -f "/usr/local/bin/npm" ]; then
+    export PATH="/usr/local/bin:$PATH"
+  else
+    echo "⚠️ npm not found, installing npm separately..."
+    sudo apt-get install -y npm
+    export PATH="/usr/bin:$PATH"
+  fi
+fi
+
+# Use full paths to ensure we can find node and npm
+NODE_CMD=$(which node || echo "/usr/bin/node")
+NPM_CMD=$(which npm || echo "/usr/bin/npm")
+
+echo "🔍 Node.js path: $NODE_CMD"
+echo "🔍 npm path: $NPM_CMD"
+echo "🔍 Node.js version: $($NODE_CMD --version 2>&1)"
+echo "🔍 npm version: $($NPM_CMD --version 2>&1)"
+
+# Install dependencies using full path
 echo "📥 Installing backend dependencies..."
-npm install --production || npm install
+$NPM_CMD install --production || $NPM_CMD install || {
+  echo "❌ npm install failed"
+  exit 1
+}
 
 # Install PM2 globally if not installed
 if ! command -v pm2 &> /dev/null; then
