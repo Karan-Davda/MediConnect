@@ -34,6 +34,7 @@ body, html {
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
+  width: 100%;
 }
 
 .admin-widget:hover {
@@ -62,7 +63,7 @@ body, html {
   color: #667eea;
   border: none;
   border-radius: 8px;
-  fontSize: 16px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -632,4 +633,39 @@ body, html {
     width: 100%;
     justify-content: center;
   }
+   
+}
+
+/* --- Appointment Calendar Color Coding --- */
+.calendar-dates span.today {
+  background-color: #3182ce;     /* blue for current date */
+  color: #ffffff;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.calendar-dates span.past {
+  color: #a0aec0;                /* grey for past dates */
+}
+
+.calendar-dates span.future {
+  color: #2f855a;                /* green for upcoming */
+}
+
+/* Highlight dates that have appointments */
+.calendar-dates span.has-appointment {
+  border: 2px solid #48bb78;     /* light green ring */
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+/* Hover for better interactivity */
+.calendar-dates span:hover {
+  background-color: rgba(102, 126, 234, 0.15);
+  cursor: pointer;
+}
+
+/* Keep other-month dates subdued */
+.calendar-dates span.other-month {
+  opacity: 0.4;
 }

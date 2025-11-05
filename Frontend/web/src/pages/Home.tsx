@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
+import PatientAppointmentsWidget from "../widgets/PatientAppointmentsWidget";
 import './Home.css';
 
 const Home: React.FC = () => {
@@ -133,64 +134,9 @@ const Home: React.FC = () => {
           </div>
 
           {/* Appointments Widget */}
-          <div className="widget appointments-widget">
-            <div className="widget-header">
-              <span className="widget-icon">📅</span>
-              <h3 className="widget-title">Appointments</h3>
-            </div>
-            <div className="widget-content">
-              <div className="calendar-section">
-                <div className="calendar-header">
-                  <span className="calendar-nav">‹</span>
-                  <span className="calendar-month">September</span>
-                  <span className="calendar-nav">›</span>
-                </div>
-                <div className="calendar-grid">
-                  <div className="calendar-days">
-                    <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
-                  </div>
-                  <div className="calendar-dates">
-                    <span className="other-month">31</span>
-                    <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span>
-                    <span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span>
-                    <span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span>
-                    <span className="selected">20</span><span>21</span><span>22</span><span>23</span><span>24</span><span>25</span><span>26</span>
-                    <span>27</span><span>28</span><span>29</span><span>30</span>
-                    <span className="other-month">1</span><span className="other-month">2</span><span className="other-month">3</span><span className="other-month">4</span>
-                  </div>
-                </div>
-              </div>
-              <div className="upcoming-appointments">
-                <h4>Upcoming Appointments</h4>
-                <div className="appointment-item">
-                  <div className="appointment-date">
-                    <span className="date-icon">📅</span>
-                    <span>Sept. 20th, 2025</span>
-                  </div>
-                  <div className="appointment-provider">
-                    <span className="provider-icon">👤</span>
-                    <span>Name</span>
-                    <span>Specialty</span>
-                  </div>
-                  <div className="appointment-actions">
-                    <button className="action-btn">
-                      <span className="btn-icon">📅</span>
-                      Reschedule
-                    </button>
-                    <button className="action-btn">
-                      <span className="btn-icon">➕</span>
-                      Add to Calendar
-                    </button>
-                    <button className="action-btn">
-                      <span className="btn-icon">✕</span>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
+          
+          <PatientAppointmentsWidget patientId="patient-123" />
+           
           {/* Medical Records Widget */}
           <div className="widget medical-records-widget">
             <div className="widget-header">
