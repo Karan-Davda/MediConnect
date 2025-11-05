@@ -174,6 +174,7 @@ fi
 set -euo pipefail
 source "$WORKSPACE/build_out.env"
 
+# Deploy Frontend
 rm -f mediconnect-dist.zip mediconnect-dist.tar.gz || true
 if command -v zip >/dev/null 2>&1; then
   (cd "$BUILD_OUT" && zip -r "$WORKSPACE/mediconnect-dist.zip" .)
@@ -217,6 +218,78 @@ sudo systemctl reload nginx || true
 sudo rm -f "$ART_ZIP" "$ART_TAR" || true
 echo "✅ Deployed static frontend to $APP_DIR"
 REMOTE
+
+# Deploy Backend
+if [ -f "$WORKSPACE/backend.tgz" ]; then
+  echo "📦 Deploying backend..."
+  scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/backend.tgz" "$SSH_USER@$EC2_HOST:/tmp/backend.tgz"
+
+  BACKEND_DIR="/opt/mediconnect-backend"
+  ssh -i "$KEYFILE" -o StrictHostKeyChecking=no "$SSH_USER@$EC2_HOST" "BACKEND_DIR=\"$BACKEND_DIR\" bash -s" <<'REMOTE_BACKEND'
+set -euo pipefail
+BACKEND_TGZ="/tmp/backend.tgz"
+
+# Create backend directory
+sudo mkdir -p "$BACKEND_DIR"
+sudo chown ubuntu:ubuntu "$BACKEND_DIR"
+
+# Extract backend
+cd "$BACKEND_DIR"
+if [ -f "$BACKEND_TGZ" ]; then
+  echo "📦 Extracting backend..."
+  sudo tar -xzf "$BACKEND_TGZ"
+  sudo chown -R ubuntu:ubuntu "$BACKEND_DIR"
+else
+  echo "❌ Backend tarball not found"
+  exit 1
+fi
+
+# Fix the getUsers() error if it exists
+if [ -f "src/routes/access-control.js" ]; then
+  echo "🔧 Fixing access-control.js if needed..."
+  sed -i 's/let usersList = getUsers();/let usersList = users;/g' src/routes/access-control.js || true
+fi
+
+# Install Node.js if not available
+export NVM_DIR="$HOME/.nvm"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  . "$NVM_DIR/nvm.sh"
+  nvm use 22 >/dev/null 2>&1 || nvm install 22 >/dev/null 2>&1
+fi
+
+# Install dependencies
+echo "📥 Installing backend dependencies..."
+npm install --production || npm install
+
+# Install PM2 globally if not installed
+if ! command -v pm2 &> /dev/null; then
+  echo "📦 Installing PM2..."
+  sudo npm install -g pm2
+fi
+
+# Stop existing backend if running
+pm2 stop mediconnect-backend 2>/dev/null || true
+pm2 delete mediconnect-backend 2>/dev/null || true
+
+# Start backend with PM2
+echo "🚀 Starting backend..."
+cd "$BACKEND_DIR"
+pm2 start server.js --name mediconnect-backend
+pm2 save
+
+# Setup PM2 startup (run once)
+pm2 startup systemd -u ubuntu --hp /home/ubuntu 2>/dev/null || true
+
+# Cleanup
+sudo rm -f "$BACKEND_TGZ"
+
+echo "✅ Backend deployed and started at $BACKEND_DIR"
+echo "🔍 Backend status:"
+pm2 list
+REMOTE_BACKEND
+else
+  echo "⚠️ backend.tgz not found, skipping backend deployment"
+fi
 '''
         }
       }
