@@ -18,8 +18,13 @@ const navItems = [
   { path: "/billing", icon: "💳", label: "Billing" },
 ];
 
+const adminNavItems = [
+  { path: "/clinic-operations", icon: "🏥", label: "Clinic Operations", roles: ["admin", "clinic_admin"] },
+  { path: "/access-control", icon: "🔐", label: "Access Control", roles: ["admin"] },
+];
+
 const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user, hasRole } = useAuth();
   const navigate = useNavigate();
 
   const handleSettingsClick = () => {
@@ -54,21 +59,47 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
               </NavLink>
             </li>
           ))}
+
+          {/* Admin Section */}
+          {isAuthenticated && user && adminNavItems.filter(item => hasRole(item.roles)).length > 0 && (
+            <>
+              <li className="nav-divider">
+                <span className="divider-text">Administration</span>
+              </li>
+              {adminNavItems
+                .filter(item => hasRole(item.roles))
+                .map((item) => (
+                  <li key={item.path} className="nav-item admin-nav-item">
+                    <NavLink
+                      to={item.path}
+                      className={({ isActive }) =>
+                        `nav-link ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <span className="nav-icon">{item.icon}</span>
+                      <span className="nav-text">{item.label}</span>
+                    </NavLink>
+                  </li>
+                ))}
+            </>
+          )}
         </ul>
       </nav>
 
       {/* Settings and Auth Section */}
       <div className="sidebar-footer">
-        {/* Settings Button */}
-        <button
-          className="settings-btn"
-          onClick={handleSettingsClick}
-          aria-label="Access Control Settings"
-          data-tooltip="Access Control"
-        >
-          <span className="settings-icon">⚙️</span>
-          <span className="settings-text">Settings</span>
-        </button>
+        {/* Settings Button - Only show for non-admin users or if they don't have admin nav */}
+        {(!isAuthenticated || !user || !hasRole(['admin'])) && (
+          <button
+            className="settings-btn"
+            onClick={handleSettingsClick}
+            aria-label="Access Control Settings"
+            data-tooltip="Access Control"
+          >
+            <span className="settings-icon">⚙️</span>
+            <span className="settings-text">Settings</span>
+          </button>
+        )}
 
         {/* Login Button */}
         {!isAuthenticated && (

@@ -57,6 +57,28 @@ const Home: React.FC = () => {
 
         {/* Dashboard Content */}
         <div className="dashboard-content">
+          {/* Admin Quick Access Widget */}
+          {isAuthenticated && user && (user.role === 'admin' || user.role === 'clinic_admin') && (
+            <div className="widget admin-widget">
+              <div className="widget-header">
+                <span className="widget-icon">🏥</span>
+                <h3 className="widget-title">Clinic Operations</h3>
+              </div>
+              <div className="widget-content">
+                <p>
+                  Manage clinic operations, check-ins, walk-ins, and waitlists
+                </p>
+                <button
+                  className="admin-widget-btn"
+                  onClick={() => navigate('/clinic-operations')}
+                >
+                  <span>🏥</span>
+                  <span>Open Clinic Dashboard</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* To Do Widget */}
           <div className="widget todo-widget">
             <div className="widget-header">

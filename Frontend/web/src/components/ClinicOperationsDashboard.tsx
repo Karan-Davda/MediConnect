@@ -84,7 +84,6 @@ const ClinicOperationsDashboard: React.FC = () => {
   const [walkIns, setWalkIns] = useState<WalkIn[]>([]);
   const [waitlists, setWaitlists] = useState<Waitlist[]>([]);
   const [clinicStatus, setClinicStatus] = useState<ClinicStatus | null>(null);
-  const [loading, setLoading] = useState(false);
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [showWalkInModal, setShowWalkInModal] = useState(false);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);

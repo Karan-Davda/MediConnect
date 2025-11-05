@@ -228,6 +228,49 @@
   }
 }
 
+/* Admin Section Divider */
+.nav-divider {
+  margin: 20px 0 10px 0;
+  padding: 0 20px;
+}
+
+.divider-text {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.4);
+  display: block;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar.collapsed .nav-divider {
+  padding: 0 10px;
+  margin: 15px 0 8px 0;
+}
+
+.sidebar.collapsed .divider-text {
+  font-size: 0;
+  padding: 0;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Admin Navigation Items */
+.admin-nav-item .nav-link {
+  background-color: rgba(139, 92, 246, 0.1);
+}
+
+.admin-nav-item .nav-link:hover {
+  background-color: rgba(139, 92, 246, 0.2);
+}
+
+.admin-nav-item.active .nav-link,
+.admin-nav-item .nav-link.active {
+  background-color: rgba(139, 92, 246, 0.25);
+  border-left-color: #8b5cf6;
+}
+
 /* Scrollbar Styling */
 .sidebar-nav::-webkit-scrollbar {
   width: 4px;
