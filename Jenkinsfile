@@ -105,7 +105,7 @@ popd >/dev/null
       }
     }
 
-    stage('Package (backend)') {
+    stage('Package and Build (backend)') {
       steps {
         sh """#!/usr/bin/env bash
 set -euo pipefail
@@ -114,6 +114,12 @@ export NVM_DIR="\$HOME/.nvm"; . "\$NVM_DIR/nvm.sh"; nvm use ${NODE_MAJOR} >/dev/
 rm -f backend.tgz || true
 if [ -f "${BACKEND_DIR}/package.json" ]; then
   pushd "${BACKEND_DIR}" >/dev/null
+  
+  # Ensure dependencies are installed before packaging
+  echo "📥 Installing backend dependencies for packaging..."
+  npm ci || npm install
+  
+  # Package backend
   tar -czf "\$WORKSPACE/backend.tgz" \\
     package.json package-lock.json \\
     \$( [ -d dist ] && echo dist ) \\
@@ -250,12 +256,18 @@ if [ -f "src/routes/access-control.js" ]; then
   sed -i 's/let usersList = getUsers();/let usersList = users;/g' src/routes/access-control.js || true
 fi
 
-# Install Node.js if not available
+# Install Node.js and NVM if not available
 export NVM_DIR="$HOME/.nvm"
-if [ -s "$NVM_DIR/nvm.sh" ]; then
-  . "$NVM_DIR/nvm.sh"
-  nvm use 22 >/dev/null 2>&1 || nvm install 22 >/dev/null 2>&1
+if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+  echo "📦 Installing NVM..."
+  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 fi
+. "$NVM_DIR/nvm.sh"
+nvm use 22 >/dev/null 2>&1 || nvm install 22 >/dev/null 2>&1
+
+# Verify Node.js and npm are available
+echo "🔍 Node.js version: $(node --version)"
+echo "🔍 npm version: $(npm --version)"
 
 # Install dependencies
 echo "📥 Installing backend dependencies..."
