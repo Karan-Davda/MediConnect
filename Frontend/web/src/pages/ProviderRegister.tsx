@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { apiUrl } from '../config/api';
 import './ProviderRegister.css';
 
 interface ProviderFormData {
@@ -227,7 +228,7 @@ const ProviderRegister: React.FC = () => {
         profile,
       };
 
-      const response = await fetch('http://localhost:3001/api/auth/register', {
+      const response = await fetch(apiUrl('auth/register'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

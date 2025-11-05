@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import type { PatientStep1Data } from './PatientRegisterStep1';
+import { apiUrl } from '../config/api';
 import './PatientRegister.css';
 
 interface PatientStep2Data {
@@ -194,7 +195,7 @@ const PatientRegisterStep2: React.FC = () => {
         },
       };
 
-      const response = await fetch('http://localhost:3001/api/auth/register', {
+      const response = await fetch(apiUrl('auth/register'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

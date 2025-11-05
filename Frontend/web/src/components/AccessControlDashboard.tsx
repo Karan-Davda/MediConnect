@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../config/api';
 import './AccessControlDashboard.css';
 
 interface User {
@@ -64,7 +65,7 @@ const AccessControlDashboard: React.FC = () => {
       }
 
       const [usersRes, logsRes] = await Promise.all([
-        fetch('/api/access-control/users', {
+        fetch(apiUrl('access-control/users'), {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -72,7 +73,7 @@ const AccessControlDashboard: React.FC = () => {
           console.error('Failed to fetch users:', err);
           return { ok: false, text: async () => 'Network error' };
         }),
-        fetch('/api/access-control/audit-logs', {
+        fetch(apiUrl('access-control/audit-logs'), {
           headers: {
             'Authorization': `Bearer ${token}`
           }
