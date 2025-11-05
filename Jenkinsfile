@@ -122,6 +122,7 @@ if [ -f "${BACKEND_DIR}/package.json" ]; then
   # Package backend
   tar -czf "\$WORKSPACE/backend.tgz" \\
     package.json package-lock.json \\
+    server.js \\
     \$( [ -d dist ] && echo dist ) \\
     \$( [ -d src ]  && echo src ) || true
   popd >/dev/null
@@ -320,6 +321,16 @@ pm2 delete mediconnect-backend 2>/dev/null || true
 # Start backend with PM2
 echo "🚀 Starting backend..."
 cd "$BACKEND_DIR"
+
+# Verify server.js exists
+if [ ! -f "server.js" ]; then
+  echo "❌ server.js not found in $BACKEND_DIR"
+  echo "📂 Contents of $BACKEND_DIR:"
+  ls -la "$BACKEND_DIR"
+  exit 1
+fi
+
+echo "✅ Found server.js, starting with PM2..."
 pm2 start server.js --name mediconnect-backend
 pm2 save
 
