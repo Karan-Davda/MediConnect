@@ -62,9 +62,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           method: 'POST'
         });
         
-        // Fallback: Try with port 3001 if we're on AWS/hosting
+        // Fallback: Try with port 3001 if we're on AWS/hosting or IP address
         const hostname = window.location.hostname;
-        if ((hostname.includes('ec2-') || hostname.includes('amazonaws.com')) && !loginUrl.includes(':3001')) {
+        const isIPAddress = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+        const isAWS = hostname.includes('ec2-') || hostname.includes('amazonaws.com');
+        if ((isIPAddress || isAWS) && !loginUrl.includes(':3001')) {
           const protocol = window.location.protocol;
           const fallbackUrl = `${protocol}//${hostname}:3001/api/auth/login`;
           console.log('🔄 Retrying with fallback URL:', fallbackUrl);
@@ -109,9 +111,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           preview: text.substring(0, 200)
         });
         
-        // Fallback: Try with port 3001 if we're on AWS/hosting
+        // Fallback: Try with port 3001 if we're on AWS/hosting or IP address
         const hostname = window.location.hostname;
-        if ((hostname.includes('ec2-') || hostname.includes('amazonaws.com')) && !loginUrl.includes(':3001')) {
+        const isIPAddress = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+        const isAWS = hostname.includes('ec2-') || hostname.includes('amazonaws.com');
+        if ((isIPAddress || isAWS) && !loginUrl.includes(':3001')) {
           const protocol = window.location.protocol;
           const fallbackUrl = `${protocol}//${hostname}:3001/api/auth/login`;
           console.log('🔄 Retrying with fallback URL:', fallbackUrl);
