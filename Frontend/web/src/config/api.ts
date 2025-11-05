@@ -10,17 +10,25 @@ const getApiBaseUrl = (): string => {
   const protocol = window.location.protocol; // http: or https:
   const port = window.location.port;
   
+  // Check if it's an IP address (like 3.144.150.239)
+  const isIPAddress = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+  
   // Production/QA environments (EC2 instances, AWS, or any cloud hosting)
-  if (
+  const isCloudHosting = (
     hostname.includes('ec2-') || 
     hostname.includes('amazonaws.com') ||
     hostname.includes('elasticbeanstalk.com') ||
     hostname.includes('appspot.com') || // Google Cloud
     hostname.includes('azurewebsites.net') || // Azure
     hostname.includes('cloudapp.net') || // Azure
-    hostname.includes('herokuapp.com') || // Heroku
-    (!hostname.includes('localhost') && !hostname.includes('127.0.0.1') && !hostname.includes('192.168.') && !hostname.includes('10.') && !hostname.includes('172.'))
-  ) {
+    hostname.includes('herokuapp.com') // Heroku
+  );
+  
+  // Check if it's a public IP (not local/private network)
+  const isPublicIP = isIPAddress && !hostname.match(/^(192\.168\.|10\.|127\.|172\.(1[6-9]|2[0-9]|3[01])\.)/);
+  
+  // Production/QA environments: IP addresses or cloud hosting
+  if (isPublicIP || isCloudHosting || (hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.match(/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/))) {
     // For AWS/hosting with nginx reverse proxy:
     // - Frontend is typically on standard ports (80/443) via nginx
     // - Backend might be:
