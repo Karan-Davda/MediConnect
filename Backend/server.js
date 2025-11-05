@@ -22,12 +22,15 @@ app.use(cors({
       process.env.CORS_ORIGIN || 'http://localhost:5173',
       'http://localhost:5173',
       'http://localhost:3000',
+      'http://3.144.150.239',
       'http://ec2-3-144-150-239.us-east-2.compute.amazonaws.com',
       'http://ec2-3-22-13-29.us-east-2.compute.amazonaws.com',
       // Allow any localhost with any port for development
       /^http:\/\/localhost:\d+$/,
       // Allow EC2 instances with any path
       /^https?:\/\/ec2-[\d-]+\.us-east-2\.compute\.amazonaws\.com/,
+      // Allow IP addresses (for QA/public IP access)
+      /^https?:\/\/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/,
     ];
     
     // Check if origin is in allowed list or matches pattern
