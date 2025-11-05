@@ -256,41 +256,20 @@ if [ -f "src/routes/access-control.js" ]; then
   sed -i 's/let usersList = getUsers();/let usersList = users;/g' src/routes/access-control.js || true
 fi
 
-# Install Node.js and NVM if not available
-export NVM_DIR="$HOME/.nvm"
-if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-  echo "📦 Installing NVM..."
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-  # Source NVM after installation
-  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+# Install Node.js if not available (use system-wide installation)
+if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+  echo "📦 Installing Node.js 22.x..."
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo apt-get install -y nodejs
 fi
-
-# Load NVM
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-[ -s "$HOME/.bashrc" ] && source "$HOME/.bashrc" || true
-
-# Install and use Node.js 22
-echo "📦 Setting up Node.js 22..."
-nvm install 22 >/dev/null 2>&1 || true
-nvm use 22 >/dev/null 2>&1 || true
-nvm alias default 22 >/dev/null 2>&1 || true
 
 # Verify Node.js and npm are available
-if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
-  echo "❌ Node.js/npm not found. Trying to reload environment..."
-  export PATH="$HOME/.nvm/versions/node/v22.*/bin:$PATH"
-  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-fi
-
-echo "🔍 Node.js version: $(node --version 2>&1 || echo 'not found')"
-echo "🔍 npm version: $(npm --version 2>&1 || echo 'not found')"
+echo "🔍 Node.js version: $(node --version 2>&1)"
+echo "🔍 npm version: $(npm --version 2>&1)"
 
 # Install dependencies
 echo "📥 Installing backend dependencies..."
-npm install --production || npm install || {
-  echo "❌ npm install failed. Trying with full path..."
-  "$HOME/.nvm/versions/node/$(nvm current 2>/dev/null || echo 'v22.0.0')/bin/npm" install --production || "$HOME/.nvm/versions/node/$(nvm current 2>/dev/null || echo 'v22.0.0')/bin/npm" install
-}
+npm install --production || npm install
 
 # Install PM2 globally if not installed
 if ! command -v pm2 &> /dev/null; then
