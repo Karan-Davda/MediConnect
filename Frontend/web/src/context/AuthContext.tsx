@@ -71,29 +71,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const fallbackUrl = `${protocol}//${hostname}:3001/api/auth/login`;
           console.log('🔄 Retrying with fallback URL:', fallbackUrl);
           
-          response = await fetch(fallbackUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ email, password }),
-          });
-          
-          // Check if fallback also failed
-          if (response.status === 405) {
-            throw new Error(`Method Not Allowed (405). The backend server may not be configured to accept POST requests. Check nginx configuration or backend server.`);
-          }
-          
-          const fallbackContentType = response.headers.get('content-type');
-          if (!fallbackContentType || !fallbackContentType.includes('application/json')) {
-            const fallbackText = await response.text();
-            console.error('❌ Fallback also failed:', {
-              status: response.status,
-              contentType: fallbackContentType,
-              url: fallbackUrl,
-              preview: fallbackText.substring(0, 200)
+          try {
+            response = await fetch(fallbackUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ email, password }),
             });
-            throw new Error(`Backend server not accessible. Check if backend is running on port 3001 and firewall rules allow access. (Status: ${response.status})`);
+            
+            console.log('📡 Fallback response status:', response.status);
+            
+            // Check if fallback also failed
+            if (response.status === 405) {
+              throw new Error(`Method Not Allowed (405). The backend server may not be configured to accept POST requests. Check nginx configuration or backend server.`);
+            }
+            
+            const fallbackContentType = response.headers.get('content-type');
+            if (!fallbackContentType || !fallbackContentType.includes('application/json')) {
+              const fallbackText = await response.text();
+              console.error('❌ Fallback also failed:', {
+                status: response.status,
+                contentType: fallbackContentType,
+                url: fallbackUrl,
+                preview: fallbackText.substring(0, 200)
+              });
+              throw new Error(`Backend server not accessible. Check if backend is running on port 3001 and firewall rules allow access. (Status: ${response.status})`);
+            }
+            
+            // Success! Continue with normal flow
+            console.log('✅ Fallback succeeded!');
+          } catch (fetchError: any) {
+            console.error('❌ Fallback fetch failed:', fetchError);
+            if (fetchError.message.includes('405') || fetchError.message.includes('Method Not Allowed')) {
+              throw fetchError;
+            }
+            throw new Error(`Cannot connect to backend on port 3001. Check if backend is running and AWS Security Group allows port 3001. Error: ${fetchError.message}`);
           }
         } else {
           throw new Error(`Method Not Allowed (405). Check if nginx is configured to proxy POST requests to /api/* or backend server is running correctly.`);
