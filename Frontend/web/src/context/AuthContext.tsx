@@ -37,7 +37,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await fetch(apiUrl('auth/login'), {
+      let loginUrl = apiUrl('auth/login');
+      console.log('🔐 Attempting login to:', loginUrl);
+      
+      let response = await fetch(loginUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -45,8 +48,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ email, password }),
       });
 
+      // Check if response is HTML (error page) instead of JSON - might mean nginx not configured
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.warn('⚠️ Received HTML instead of JSON. Trying fallback with port 3001...');
+        console.error('❌ First attempt failed:', {
+          status: response.status,
+          contentType,
+          url: loginUrl,
+          preview: text.substring(0, 200)
+        });
+        
+        // Fallback: Try with port 3001 if we're on AWS/hosting
+        const hostname = window.location.hostname;
+        if ((hostname.includes('ec2-') || hostname.includes('amazonaws.com')) && !loginUrl.includes(':3001')) {
+          const protocol = window.location.protocol;
+          const fallbackUrl = `${protocol}//${hostname}:3001/api/auth/login`;
+          console.log('🔄 Retrying with fallback URL:', fallbackUrl);
+          
+          response = await fetch(fallbackUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ email, password }),
+          });
+          
+          const fallbackContentType = response.headers.get('content-type');
+          if (!fallbackContentType || !fallbackContentType.includes('application/json')) {
+            const fallbackText = await response.text();
+            console.error('❌ Fallback also failed:', {
+              status: response.status,
+              contentType: fallbackContentType,
+              url: fallbackUrl,
+              preview: fallbackText.substring(0, 200)
+            });
+            throw new Error(`Backend server not accessible. Check if backend is running on port 3001 and firewall rules allow access. (Status: ${response.status})`);
+          }
+        } else {
+          throw new Error(`Server returned invalid response. Check if backend is running and API URL is correct. (${response.status})`);
+        }
+      }
+
       if (!response.ok) {
-        const error = await response.json();
+        const error = await response.json().catch(() => ({ error: 'Login failed' }));
         throw new Error(error.error || 'Login failed');
       }
 

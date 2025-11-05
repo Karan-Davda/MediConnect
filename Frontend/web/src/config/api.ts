@@ -25,17 +25,18 @@ const getApiBaseUrl = (): string => {
     // - Frontend is typically on standard ports (80/443) via nginx
     // - Backend might be:
     //   1. Proxied through nginx on same domain (preferred - no port needed)
-    //   2. On same hostname but different port (3001)
+    //   2. On same hostname but different port (3001) - fallback if nginx not configured
     //   3. On subdomain (api.hostname.com)
     
-    // If no port specified (standard 80/443), assume backend is proxied through nginx
-    // on the same domain, so use same origin without port
+    // If no port specified (standard 80/443), try same origin first (nginx proxy)
+    // If that fails, fallback to port 3001
     if (!port || port === '80' || port === '443' || port === '') {
-      // Use same origin - nginx will route /api/* to backend
+      // Try same origin first - nginx will route /api/* to backend if configured
+      // If nginx isn't configured, we'll need to use port 3001 as fallback
+      // This will be handled by the API call error handling
       return `${protocol}//${hostname}`;
     } else {
       // Frontend on custom port: backend might be on same host, port 3001
-      // This is less common in production but possible in staging
       return `${protocol}//${hostname}:3001`;
     }
   }
@@ -66,13 +67,13 @@ export const apiUrl = (endpoint: string): string => {
   return `${API_BASE_URL}/api/${cleanEndpoint}`;
 };
 
-// Export for debugging
-if (import.meta.env.DEV) {
-  console.log('🌐 Detected Environment:', {
-    hostname: window.location.hostname,
-    protocol: window.location.protocol,
-    port: window.location.port,
-    apiBaseUrl: API_BASE_URL
-  });
-}
+// Export for debugging - always log in QA/Production to help troubleshoot
+console.log('🌐 API Configuration:', {
+  hostname: window.location.hostname,
+  protocol: window.location.protocol,
+  port: window.location.port || 'default',
+  apiBaseUrl: API_BASE_URL,
+  fullUrl: `${API_BASE_URL}/api/auth/login`,
+  env: import.meta.env.MODE || 'production'
+});
 
