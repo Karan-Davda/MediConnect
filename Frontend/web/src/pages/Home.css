@@ -28,6 +28,60 @@ body, html {
   padding: 0;
 }
 
+/* Admin Widget Styles */
+.admin-widget {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.admin-widget:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+
+.admin-widget .widget-header {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.admin-widget .widget-title {
+  color: white;
+}
+
+.admin-widget .widget-content p {
+  margin-bottom: 15px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.admin-widget-btn {
+  width: 100%;
+  padding: 12px 20px;
+  background-color: rgba(255, 255, 255, 0.95);
+  color: #667eea;
+  border: none;
+  border-radius: 8px;
+  fontSize: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.admin-widget-btn:hover {
+  background-color: white;
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.admin-widget-btn:active {
+  transform: scale(0.98);
+}
+
 /* Sidebar styles are now in Sidebar.css component */
 
 /* Main Content Area */

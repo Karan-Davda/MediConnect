@@ -39,7 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       let loginUrl = apiUrl('auth/login');
       console.log('🔐 Attempting login to:', loginUrl);
-      
+
       let response = await fetch(loginUrl, {
         method: 'POST',
         headers: {
