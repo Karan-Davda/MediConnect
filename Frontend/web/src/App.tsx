@@ -11,6 +11,7 @@ import AccessControl from './pages/AccessControl'
 import ClinicOperations from './pages/ClinicOperations'
 import MedicalRecords from './pages/MedicalRecords'
 import Prescriptions from './pages/Prescriptions'
+import Insurance from './pages/Insurance'
 import './App.css'
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
       <Route path="/clinic-operations" element={<ClinicOperations />} />
       <Route path="/medical-records" element={<MedicalRecords />} />
       <Route path="/prescriptions" element={<Prescriptions />} />
+      <Route path="/insurance" element={<Insurance />} />
     </Routes>
   )
 }

@@ -6,6 +6,7 @@ const accessControlRoutes = require('./src/routes/access-control');
 const clinicOperationsRoutes = require('./src/routes/clinic-operations');
 const medicalRecordsRoutes = require('./src/routes/medical-records');
 const prescriptionRoutes = require('./src/routes/prescriptions');
+const insuranceRoutes = require('./src/routes/insurance');
 const { authenticate } = require('./src/middleware/auth');
 
 dotenv.config();
@@ -76,6 +77,7 @@ app.use('/api/access-control', accessControlRoutes);
 app.use('/api/clinic-operations', clinicOperationsRoutes);
 app.use('/api/medical-records', medicalRecordsRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
+app.use('/api/insurance', insuranceRoutes);
 
 app.get('/api/protected', authenticate, (req, res) => {
   res.json({
