@@ -52,8 +52,8 @@ const getApiBaseUrl = (): string => {
   // Local development
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     // Check if backend might be on different port (common in dev)
-    // Default to 3000, but can be overridden with env var
-    return 'http://localhost:3000';
+    // Backend runs on 3001, frontend on 5173 (Vite) or 3000
+    return 'http://localhost:3001';
   }
   
   // Local network (192.168.x.x, 10.x.x.x, etc.)
@@ -63,7 +63,7 @@ const getApiBaseUrl = (): string => {
   }
   
   // Default fallback
-  return 'http://localhost:3000';
+  return 'http://localhost:3001';
 };
 
 export const API_BASE_URL = getApiBaseUrl();
