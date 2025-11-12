@@ -1,7 +1,9 @@
 const express = require('express');
+const path = require('path');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { PERMISSIONS, hasPermission } = require('../models/Role');
 const { logAccess, AUDIT_ACTIONS } = require('../middleware/auditLogger');
+const upload = require('../middleware/upload');
 const {
   createPatient,
   findPatientById,
@@ -469,6 +471,368 @@ router.get('/patient/:patientId/history', authenticate, canViewMedicalRecords, a
     });
 
     res.json(history);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// SCAN ATTACHMENT ROUTES
+// ============================================
+
+/**
+ * POST /api/medical-records/:recordId/attachments
+ * Add scan attachment to a medical record (with file upload)
+ */
+// Error handler for multer
+const handleMulterError = (err, req, res, next) => {
+  if (err) {
+    console.error('Multer error:', err);
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ 
+        error: 'File too large',
+        message: 'File size must be less than 10MB'
+      });
+    }
+    return res.status(400).json({ 
+      error: 'File upload error',
+      message: err.message || 'Failed to upload file'
+    });
+  }
+  next();
+};
+
+router.post('/:recordId/attachments', authenticate, canManageMedicalRecords, upload.single('scanFile'), handleMulterError, async (req, res) => {
+  try {
+    const { recordId } = req.params;
+    const { name, type } = req.body;
+
+    console.log('Upload request received:', {
+      recordId,
+      name,
+      type,
+      hasFile: !!req.file,
+      fileInfo: req.file ? {
+        originalname: req.file.originalname,
+        filename: req.file.filename,
+        size: req.file.size,
+        mimetype: req.file.mimetype
+      } : null
+    });
+
+    // Validate required fields
+    if (!name || !type) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        required: ['name', 'type']
+      });
+    }
+
+    // Check if file was uploaded
+    if (!req.file) {
+      return res.status(400).json({ 
+        error: 'No file uploaded',
+        message: 'Please select an image file to upload'
+      });
+    }
+
+    const record = findMedicalRecordById(recordId);
+    if (!record) {
+      // Delete uploaded file if record not found
+      if (req.file) {
+        const fs = require('fs');
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(404).json({ error: 'Medical record not found' });
+    }
+
+    // Check clinic access
+    if (req.user.clinicId && record.clinicId !== req.user.clinicId) {
+      // Delete uploaded file if access denied
+      if (req.file) {
+        const fs = require('fs');
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Create URL for the uploaded file
+    const fileUrl = `/api/medical-records/assets/${req.file.filename}`;
+
+    // Create attachment object
+    const attachment = {
+      id: `attachment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name,
+      type,
+      url: fileUrl,
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      size: req.file.size,
+      date: new Date().toISOString()
+    };
+
+    // Add attachment to record
+    if (!record.attachments) {
+      record.attachments = [];
+    }
+    record.attachments.push(attachment);
+    record.updatedAt = new Date();
+    record.updatedBy = req.user.userId;
+
+    logAccess(req, AUDIT_ACTIONS.CREATE, {
+      resourceType: 'SCAN_ATTACHMENT',
+      resourceId: attachment.id,
+      details: `Added scan attachment: ${name} to medical record ${recordId}`
+    });
+
+    res.status(201).json({
+      message: 'Scan attachment added successfully',
+      attachment
+    });
+  } catch (error) {
+    // Delete uploaded file if there's an error
+    if (req.file) {
+      const fs = require('fs');
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (unlinkError) {
+        console.error('Error deleting file:', unlinkError);
+      }
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/medical-records/assets/:filename
+ * Serve uploaded scan images
+ */
+router.get('/assets/:filename', authenticate, (req, res) => {
+  try {
+    const { filename } = req.params;
+    const path = require('path');
+    const fs = require('fs');
+    
+    const filePath = path.join(__dirname, '../../Assets', filename);
+    
+    console.log('Serving file:', filePath);
+    
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      console.error('File not found:', filePath);
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    // Set proper content type
+    const ext = path.extname(filename).toLowerCase();
+    const contentTypes = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.bmp': 'image/bmp',
+      '.dcm': 'application/dicom',
+      '.dicom': 'application/dicom'
+    };
+    
+    res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
+    
+    // Send file
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    console.error('Error serving file:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/medical-records/:recordId/attachments
+ * Get all attachments for a medical record
+ */
+router.get('/:recordId/attachments', authenticate, canViewMedicalRecords, async (req, res) => {
+  try {
+    const { recordId } = req.params;
+
+    const record = findMedicalRecordById(recordId);
+    if (!record) {
+      return res.status(404).json({ error: 'Medical record not found' });
+    }
+
+    // Patients can only view their own records
+    if (req.user.role === 'patient') {
+      const patient = findPatientByUserId(req.user.userId);
+      if (!patient || record.patientId !== patient.id) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    // Clinic staff can only view records from their clinic
+    if (req.user.role === 'clinic_staff' || req.user.role === 'doctor') {
+      if (req.user.clinicId && record.clinicId !== req.user.clinicId) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    logAccess(req, AUDIT_ACTIONS.VIEW, {
+      resourceType: 'SCAN_ATTACHMENT',
+      resourceId: recordId,
+      details: 'Viewed scan attachments'
+    });
+
+    res.json({
+      recordId,
+      count: record.attachments?.length || 0,
+      attachments: record.attachments || []
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/medical-records/:recordId/attachments/:attachmentId
+ * Delete a scan attachment from a medical record
+ */
+router.delete('/:recordId/attachments/:attachmentId', authenticate, canManageMedicalRecords, async (req, res) => {
+  try {
+    const { recordId, attachmentId } = req.params;
+
+    const record = findMedicalRecordById(recordId);
+    if (!record) {
+      return res.status(404).json({ error: 'Medical record not found' });
+    }
+
+    // Check clinic access
+    if (req.user.clinicId && record.clinicId !== req.user.clinicId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (!record.attachments || record.attachments.length === 0) {
+      return res.status(404).json({ error: 'No attachments found' });
+    }
+
+    const attachmentIndex = record.attachments.findIndex(a => a.id === attachmentId);
+    if (attachmentIndex === -1) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+
+    const deletedAttachment = record.attachments[attachmentIndex];
+    record.attachments.splice(attachmentIndex, 1);
+    record.updatedAt = new Date();
+    record.updatedBy = req.user.userId;
+
+    logAccess(req, AUDIT_ACTIONS.DELETE, {
+      resourceType: 'SCAN_ATTACHMENT',
+      resourceId: attachmentId,
+      details: `Deleted scan attachment: ${deletedAttachment.name} from medical record ${recordId}`
+    });
+
+    res.json({
+      message: 'Scan attachment deleted successfully'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/medical-records/:recordId/attachments/:attachmentId/annotations
+ * Get annotations for a specific scan attachment
+ */
+router.get('/:recordId/attachments/:attachmentId/annotations', authenticate, canViewMedicalRecords, async (req, res) => {
+  try {
+    const { recordId, attachmentId } = req.params;
+
+    const record = findMedicalRecordById(recordId);
+    if (!record) {
+      return res.status(404).json({ error: 'Medical record not found' });
+    }
+
+    // Check clinic access
+    if (req.user.clinicId && record.clinicId !== req.user.clinicId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (!record.attachments || record.attachments.length === 0) {
+      return res.status(404).json({ error: 'No attachments found' });
+    }
+
+    const attachment = record.attachments.find(a => a.id === attachmentId);
+    if (!attachment) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+
+    logAccess(req, AUDIT_ACTIONS.VIEW, {
+      resourceType: 'SCAN_ANNOTATION',
+      resourceId: attachmentId,
+      details: 'Viewed scan annotations'
+    });
+
+    res.json({
+      attachmentId,
+      annotations: attachment.annotations || []
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PUT /api/medical-records/:recordId/attachments/:attachmentId/annotations
+ * Save annotations for a specific scan attachment
+ */
+router.put('/:recordId/attachments/:attachmentId/annotations', authenticate, canManageMedicalRecords, async (req, res) => {
+  try {
+    const { recordId, attachmentId } = req.params;
+    const { annotations } = req.body;
+
+    if (!Array.isArray(annotations)) {
+      return res.status(400).json({ error: 'Annotations must be an array' });
+    }
+
+    const record = findMedicalRecordById(recordId);
+    if (!record) {
+      return res.status(404).json({ error: 'Medical record not found' });
+    }
+
+    // Check clinic access
+    if (req.user.clinicId && record.clinicId !== req.user.clinicId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (!record.attachments || record.attachments.length === 0) {
+      return res.status(404).json({ error: 'No attachments found' });
+    }
+
+    const attachment = record.attachments.find(a => a.id === attachmentId);
+    if (!attachment) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+
+    // Validate annotations structure
+    const validAnnotations = annotations.filter(ann => {
+      return ann.id && ann.type && typeof ann.x === 'number' && typeof ann.y === 'number' && ann.color;
+    });
+
+    // Save annotations to attachment
+    attachment.annotations = validAnnotations;
+    attachment.annotationsUpdatedAt = new Date();
+    attachment.annotationsUpdatedBy = req.user.userId;
+    record.updatedAt = new Date();
+    record.updatedBy = req.user.userId;
+
+    logAccess(req, AUDIT_ACTIONS.UPDATE, {
+      resourceType: 'SCAN_ANNOTATION',
+      resourceId: attachmentId,
+      details: `Saved ${validAnnotations.length} annotations for scan attachment`
+    });
+
+    res.json({
+      message: 'Annotations saved successfully',
+      attachmentId,
+      count: validAnnotations.length,
+      annotations: validAnnotations
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

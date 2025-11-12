@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/Sidebar';
+import ScanViewer from '../components/ScanViewer';
 import { apiUrl } from '../config/api';
 import './MedicalRecords.css';
 
@@ -34,6 +35,15 @@ interface LabResult {
   notes?: string;
 }
 
+interface ScanAttachment {
+  id: string;
+  name: string;
+  type: string;
+  url: string;
+  date?: string;
+  size?: number;
+}
+
 interface MedicalRecord {
   id: string;
   patientId: string;
@@ -52,6 +62,7 @@ interface MedicalRecord {
     height?: number;
   };
   notes?: string;
+  attachments?: ScanAttachment[];
 }
 
 interface Patient {
@@ -73,6 +84,21 @@ const MedicalRecords: React.FC = () => {
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
   
+  // Scan viewer state
+  const [showScanViewer, setShowScanViewer] = useState(false);
+  const [selectedScans, setSelectedScans] = useState<ScanAttachment[]>([]);
+  const [scanViewerIndex, setScanViewerIndex] = useState(0);
+  const [currentRecordId, setCurrentRecordId] = useState<string | null>(null);
+  
+  // Attachment management state
+  const [showAddAttachment, setShowAddAttachment] = useState<string | null>(null);
+  const [newAttachment, setNewAttachment] = useState({
+    name: '',
+    type: '',
+    file: null as File | null
+  });
+  const [uploading, setUploading] = useState(false);
+  
   // Form state
   const [showForm, setShowForm] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
@@ -91,7 +117,8 @@ const MedicalRecords: React.FC = () => {
       weight: '',
       height: ''
     },
-    notes: ''
+    notes: '',
+    attachments: [] as ScanAttachment[]
   });
 
   const canManageRecords = hasRole(['doctor', 'clinic_staff', 'clinic_admin']);
@@ -180,7 +207,13 @@ const MedicalRecords: React.FC = () => {
         labResults: formData.labResults.filter(l => l.testName && l.result),
         vitalSigns: Object.fromEntries(
           Object.entries(formData.vitalSigns).filter(([_, v]) => v !== '')
-        )
+        ),
+        attachments: formData.attachments.map(att => ({
+          name: att.name,
+          type: att.type,
+          url: att.url,
+          date: att.date || new Date().toISOString()
+        }))
       };
 
       const isEditing = editingRecordId !== null;
@@ -230,7 +263,8 @@ const MedicalRecords: React.FC = () => {
         weight: '',
         height: ''
       },
-      notes: ''
+      notes: '',
+      attachments: []
     });
     setEditingRecordId(null);
   };
@@ -266,12 +300,172 @@ const MedicalRecords: React.FC = () => {
         weight: record.vitalSigns?.weight?.toString() || '',
         height: record.vitalSigns?.height?.toString() || ''
       },
-      notes: record.notes || ''
+      notes: record.notes || '',
+      attachments: record.attachments || []
     });
     setEditingRecordId(record.id);
     setShowForm(true);
     // Scroll to form
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleViewScans = (record: MedicalRecord) => {
+    // Collect all scans from this record and all other records for comparison
+    const allScans: ScanAttachment[] = [];
+    records.forEach(r => {
+      if (r.attachments && r.attachments.length > 0) {
+        allScans.push(...r.attachments);
+      }
+    });
+    
+    if (allScans.length === 0) {
+      setError('No scans available for viewing');
+      return;
+    }
+
+    // Find the index of the first scan from the selected record
+    const recordScans = record.attachments || [];
+    const firstScanIndex = recordScans.length > 0 
+      ? allScans.findIndex(s => s.id === recordScans[0].id)
+      : 0;
+
+    setSelectedScans(allScans);
+    setScanViewerIndex(Math.max(0, firstScanIndex));
+    setShowScanViewer(true);
+    // Store the record ID for saving annotations
+    setCurrentRecordId(record.id);
+  };
+
+  const getScanCount = (record: MedicalRecord): number => {
+    return record.attachments?.length || 0;
+  };
+
+  const isImagingScan = (attachment: ScanAttachment): boolean => {
+    const imagingTypes = ['x-ray', 'xray', 'mri', 'ct', 'ct scan', 'ultrasound', 'scan', 'image'];
+    const type = attachment.type?.toLowerCase() || '';
+    const name = attachment.name?.toLowerCase() || '';
+    return imagingTypes.some(t => type.includes(t) || name.includes(t));
+  };
+
+  const handleAddAttachmentToRecord = async (recordId: string) => {
+    if (!newAttachment.name || !newAttachment.type || !newAttachment.file) {
+      setError('Please fill in all fields and select an image file');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setError('');
+      
+      // Create FormData for file upload
+      const formData = new FormData();
+      formData.append('scanFile', newAttachment.file);
+      formData.append('name', newAttachment.name);
+      formData.append('type', newAttachment.type);
+
+      console.log('Uploading file:', {
+        recordId,
+        name: newAttachment.name,
+        type: newAttachment.type,
+        fileName: newAttachment.file.name,
+        fileSize: newAttachment.file.size,
+        fileType: newAttachment.file.type
+      });
+
+      const uploadUrl = apiUrl(`medical-records/${recordId}/attachments`);
+      console.log('Upload URL:', uploadUrl);
+
+      const response = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          // Don't set Content-Type, let browser set it with boundary for FormData
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to add attachment';
+        try {
+          const error = await response.json();
+          errorMessage = error.error || error.message || errorMessage;
+          console.error('Upload error:', error);
+        } catch (e) {
+          const text = await response.text();
+          console.error('Upload error (non-JSON):', text);
+          errorMessage = text || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      setSuccess('Scan attachment uploaded successfully!');
+      setNewAttachment({ name: '', type: '', file: null });
+      setShowAddAttachment(null);
+      loadRecords();
+    } catch (err: any) {
+      setError(err.message || 'Failed to upload attachment');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setError('Please select an image file (JPEG, PNG, GIF, etc.)');
+        e.target.value = ''; // Reset file input
+        return;
+      }
+      // Validate file size (10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setError('File size must be less than 10MB');
+        e.target.value = ''; // Reset file input
+        return;
+      }
+      setNewAttachment({ ...newAttachment, file });
+      setError('');
+      console.log('File selected:', file.name, file.size, file.type);
+    }
+  };
+
+  const handleDeleteScan = async (scanId: string) => {
+    try {
+      // Find the record that contains this scan
+      const record = records.find(r => 
+        r.attachments && r.attachments.some(a => a.id === scanId)
+      );
+      
+      if (!record) {
+        setError('Record not found');
+        return;
+      }
+
+      const response = await fetch(apiUrl(`medical-records/${record.id}/attachments/${scanId}`), {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete scan');
+      }
+
+      setSuccess('Scan deleted successfully!');
+      
+      // Close scan viewer if the deleted scan was being viewed
+      if (selectedScans.some(s => s.id === scanId)) {
+        setShowScanViewer(false);
+      }
+      
+      // Reload records to update the list
+      loadRecords();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete scan');
+    }
   };
 
   const addDiagnosis = () => {
@@ -685,6 +879,15 @@ const MedicalRecords: React.FC = () => {
                 />
               </div>
 
+              <div className="form-section">
+                <div className="section-header">
+                  <h4>Medical Scans / Attachments</h4>
+                </div>
+                <small style={{ color: '#666', marginTop: '8px', display: 'block', marginBottom: '10px' }}>
+                  💡 Note: You can add scan attachments after creating the record using the "+ Add Scan" button on the record card.
+                </small>
+              </div>
+
               <div className="form-actions">
                 <button type="submit" className="btn btn-primary">
                   {editingRecordId ? 'Update Record' : 'Add Record'}
@@ -762,6 +965,113 @@ const MedicalRecords: React.FC = () => {
                           </ul>
                         </div>
                       )}
+                      <div className="record-scans">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                          <strong>Medical Scans ({getScanCount(record)}):</strong>
+                          {canManageRecords && !showAddAttachment && (
+                            <button
+                              className="btn btn-sm"
+                              onClick={() => {
+                                setShowAddAttachment(record.id);
+                                setNewAttachment({ name: '', type: '', file: null });
+                              }}
+                              style={{ fontSize: '12px', padding: '4px 8px' }}
+                            >
+                              + Add Scan
+                            </button>
+                          )}
+                        </div>
+                        
+                        {showAddAttachment === record.id && (
+                          <div style={{ padding: '10px', background: '#fff', borderRadius: '4px', marginBottom: '10px', border: '1px solid #ddd', maxWidth: '100%', boxSizing: 'border-box' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                              <strong style={{ fontSize: '13px' }}>Add New Scan</strong>
+                              <button
+                                onClick={() => {
+                                  setShowAddAttachment(null);
+                                  setNewAttachment({ name: '', type: '', file: null });
+                                }}
+                                style={{ background: '#6c757d', color: 'white', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}
+                                disabled={uploading}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                <input
+                                  type="text"
+                                  placeholder="Scan Name"
+                                  value={newAttachment.name}
+                                  onChange={(e) => setNewAttachment({ ...newAttachment, name: e.target.value })}
+                                  style={{ padding: '6px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '12px', flex: '1', minWidth: '120px', boxSizing: 'border-box' }}
+                                  disabled={uploading}
+                                />
+                                <select
+                                  value={newAttachment.type}
+                                  onChange={(e) => setNewAttachment({ ...newAttachment, type: e.target.value })}
+                                  style={{ padding: '6px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '12px', flex: '1', minWidth: '120px', boxSizing: 'border-box' }}
+                                  disabled={uploading}
+                                >
+                                  <option value="">Select Type</option>
+                                  <option value="X-Ray">X-Ray</option>
+                                  <option value="MRI">MRI</option>
+                                  <option value="CT Scan">CT Scan</option>
+                                  <option value="Ultrasound">Ultrasound</option>
+                                  <option value="Other">Other</option>
+                                </select>
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleFileChange}
+                                  style={{ padding: '6px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '12px', flex: '1', minWidth: '200px', boxSizing: 'border-box' }}
+                                  disabled={uploading}
+                                />
+                                <button
+                                  onClick={() => handleAddAttachmentToRecord(record.id)}
+                                  className="btn btn-sm"
+                                  style={{ fontSize: '12px', padding: '6px 12px', flexShrink: 0, whiteSpace: 'nowrap' }}
+                                  disabled={uploading || !newAttachment.file}
+                                >
+                                  {uploading ? 'Uploading...' : 'Upload'}
+                                </button>
+                              </div>
+                              {newAttachment.file && (
+                                <small style={{ color: '#28a745', fontSize: '11px' }}>
+                                  ✓ Selected: {newAttachment.file.name} ({(newAttachment.file.size / 1024).toFixed(2)} KB)
+                                </small>
+                              )}
+                            </div>
+                            <small style={{ color: '#666', fontSize: '11px', wordBreak: 'break-word', display: 'block' }}>
+                              💡 Select an image file (JPEG, PNG, GIF, etc.) up to 10MB. File will be saved with naming: {`{Diagnosis}_{Patient Name}_{Date}`}
+                            </small>
+                          </div>
+                        )}
+
+                        {record.attachments && record.attachments.length > 0 ? (
+                          <>
+                            <div className="scans-list">
+                              {record.attachments.filter(isImagingScan).map((scan, i) => (
+                                <div key={scan.id || i} className="scan-item">
+                                  <span>📄 {scan.name || `Scan ${i + 1}`}</span>
+                                  <span className="scan-type">{scan.type}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <button 
+                              className="view-scans-btn"
+                              onClick={() => handleViewScans(record)}
+                              title="View Scans"
+                            >
+                              🔍 View Scans
+                            </button>
+                          </>
+                        ) : !showAddAttachment && (
+                          <p style={{ color: '#666', fontSize: '13px', margin: '8px 0' }}>No scans attached. Click "+ Add Scan" to add one.</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -770,6 +1080,42 @@ const MedicalRecords: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {showScanViewer && (
+        <ScanViewer
+          scans={selectedScans.map(scan => {
+            let imageUrl = scan.url;
+            // If URL starts with /api/medical-records/assets/, convert it to full API URL
+            if (scan.url.startsWith('/api/medical-records/assets/')) {
+              imageUrl = apiUrl(scan.url.replace('/api/', ''));
+            } else if (scan.url.startsWith('/api/')) {
+              imageUrl = apiUrl(scan.url.replace('/api/', ''));
+            }
+            
+            // Find which record this scan belongs to
+            const scanRecord = records.find(r => 
+              r.attachments && r.attachments.some(a => a.id === scan.id)
+            );
+            
+            return {
+              id: scan.id,
+              url: imageUrl,
+              name: scan.name,
+              type: scan.type,
+              date: scan.date,
+              recordId: scanRecord?.id || currentRecordId || undefined
+            };
+          })}
+          onClose={() => {
+            setShowScanViewer(false);
+            setCurrentRecordId(null);
+          }}
+          initialScanIndex={scanViewerIndex}
+          onDeleteScan={handleDeleteScan}
+          canDelete={canManageRecords}
+          recordId={currentRecordId || undefined}
+        />
+      )}
     </div>
   );
 };
