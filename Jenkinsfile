@@ -105,7 +105,7 @@ popd >/dev/null
       }
     }
 
-    stage('Package (backend)') {
+    stage('Package and Build (backend)') {
       steps {
         sh """#!/usr/bin/env bash
 set -euo pipefail
@@ -114,8 +114,15 @@ export NVM_DIR="\$HOME/.nvm"; . "\$NVM_DIR/nvm.sh"; nvm use ${NODE_MAJOR} >/dev/
 rm -f backend.tgz || true
 if [ -f "${BACKEND_DIR}/package.json" ]; then
   pushd "${BACKEND_DIR}" >/dev/null
+  
+  # Ensure dependencies are installed before packaging
+  echo "📥 Installing backend dependencies for packaging..."
+  npm ci || npm install
+  
+  # Package backend
   tar -czf "\$WORKSPACE/backend.tgz" \\
     package.json package-lock.json \\
+    server.js \\
     \$( [ -d dist ] && echo dist ) \\
     \$( [ -d src ]  && echo src ) || true
   popd >/dev/null
@@ -174,6 +181,7 @@ fi
 set -euo pipefail
 source "$WORKSPACE/build_out.env"
 
+# Deploy Frontend
 rm -f mediconnect-dist.zip mediconnect-dist.tar.gz || true
 if command -v zip >/dev/null 2>&1; then
   (cd "$BUILD_OUT" && zip -r "$WORKSPACE/mediconnect-dist.zip" .)
@@ -217,6 +225,128 @@ sudo systemctl reload nginx || true
 sudo rm -f "$ART_ZIP" "$ART_TAR" || true
 echo "✅ Deployed static frontend to $APP_DIR"
 REMOTE
+
+# Deploy Backend
+if [ -f "$WORKSPACE/backend.tgz" ]; then
+  echo "📦 Deploying backend..."
+  scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/backend.tgz" "$SSH_USER@$EC2_HOST:/tmp/backend.tgz"
+
+  BACKEND_DIR="/opt/mediconnect-backend"
+  ssh -i "$KEYFILE" -o StrictHostKeyChecking=no "$SSH_USER@$EC2_HOST" "BACKEND_DIR=\"$BACKEND_DIR\" bash -s" <<'REMOTE_BACKEND'
+set -euo pipefail
+BACKEND_TGZ="/tmp/backend.tgz"
+
+# Create backend directory
+sudo mkdir -p "$BACKEND_DIR"
+sudo chown ubuntu:ubuntu "$BACKEND_DIR"
+
+# Extract backend
+cd "$BACKEND_DIR"
+if [ -f "$BACKEND_TGZ" ]; then
+  echo "📦 Extracting backend..."
+  sudo tar -xzf "$BACKEND_TGZ"
+  sudo chown -R ubuntu:ubuntu "$BACKEND_DIR"
+else
+  echo "❌ Backend tarball not found"
+  exit 1
+fi
+
+# Fix the getUsers() error if it exists
+if [ -f "src/routes/access-control.js" ]; then
+  echo "🔧 Fixing access-control.js if needed..."
+  sed -i 's/let usersList = getUsers();/let usersList = users;/g' src/routes/access-control.js || true
+fi
+
+# Install Node.js if not available (use system-wide installation)
+if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+  echo "📦 Installing Node.js 22.x..."
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+  # Update PATH to include Node.js binaries
+  export PATH="/usr/bin:$PATH"
+fi
+
+# Verify Node.js and npm are available
+if ! command -v node &> /dev/null; then
+  echo "❌ Node.js not found, checking common locations..."
+  if [ -f "/usr/bin/node" ]; then
+    export PATH="/usr/bin:$PATH"
+  elif [ -f "/usr/local/bin/node" ]; then
+    export PATH="/usr/local/bin:$PATH"
+  else
+    echo "❌ Node.js installation failed"
+    exit 1
+  fi
+fi
+
+if ! command -v npm &> /dev/null; then
+  echo "❌ npm not found, checking common locations..."
+  if [ -f "/usr/bin/npm" ]; then
+    export PATH="/usr/bin:$PATH"
+  elif [ -f "/usr/local/bin/npm" ]; then
+    export PATH="/usr/local/bin:$PATH"
+  else
+    echo "⚠️ npm not found, installing npm separately..."
+    sudo apt-get install -y npm
+    export PATH="/usr/bin:$PATH"
+  fi
+fi
+
+# Use full paths to ensure we can find node and npm
+NODE_CMD=$(which node || echo "/usr/bin/node")
+NPM_CMD=$(which npm || echo "/usr/bin/npm")
+
+echo "🔍 Node.js path: $NODE_CMD"
+echo "🔍 npm path: $NPM_CMD"
+echo "🔍 Node.js version: $($NODE_CMD --version 2>&1)"
+echo "🔍 npm version: $($NPM_CMD --version 2>&1)"
+
+# Install dependencies using full path
+echo "📥 Installing backend dependencies..."
+$NPM_CMD install --production || $NPM_CMD install || {
+  echo "❌ npm install failed"
+  exit 1
+}
+
+# Install PM2 globally if not installed
+if ! command -v pm2 &> /dev/null; then
+  echo "📦 Installing PM2..."
+  sudo npm install -g pm2
+fi
+
+# Stop existing backend if running
+pm2 stop mediconnect-backend 2>/dev/null || true
+pm2 delete mediconnect-backend 2>/dev/null || true
+
+# Start backend with PM2
+echo "🚀 Starting backend..."
+cd "$BACKEND_DIR"
+
+# Verify server.js exists
+if [ ! -f "server.js" ]; then
+  echo "❌ server.js not found in $BACKEND_DIR"
+  echo "📂 Contents of $BACKEND_DIR:"
+  ls -la "$BACKEND_DIR"
+  exit 1
+fi
+
+echo "✅ Found server.js, starting with PM2..."
+pm2 start server.js --name mediconnect-backend
+pm2 save
+
+# Setup PM2 startup (run once)
+pm2 startup systemd -u ubuntu --hp /home/ubuntu 2>/dev/null || true
+
+# Cleanup
+sudo rm -f "$BACKEND_TGZ"
+
+echo "✅ Backend deployed and started at $BACKEND_DIR"
+echo "🔍 Backend status:"
+pm2 list
+REMOTE_BACKEND
+else
+  echo "⚠️ backend.tgz not found, skipping backend deployment"
+fi
 '''
         }
       }

@@ -10,6 +10,8 @@ import FindDoctors from './pages/FindDoctors'
 import AccessControl from './pages/AccessControl'
 import ClinicOperations from './pages/ClinicOperations'
 import MedicalRecords from './pages/MedicalRecords'
+import Prescriptions from './pages/Prescriptions'
+import Insurance from './pages/Insurance'
 import HomeProvider from './pages/HomeProvider'
 import './App.css'
 
@@ -28,7 +30,6 @@ function App() {
       <Route path="/access-control" element={<AccessControl />} />
       <Route path="/clinic-operations" element={<ClinicOperations />} />
       <Route path="/medical-records" element={<MedicalRecords />} />
-      <Route path="/home-provider" element={<HomeProvider />} />
     </Routes>
   )
 }

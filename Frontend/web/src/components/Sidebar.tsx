@@ -13,6 +13,8 @@ const navItems = [
   { path: "/find-doctors", icon: "🔍", label: "Find Doctors" },
   { path: "/book-appointment", icon: "📅", label: "Appointments" },
   { path: "/medical-records", icon: "📋", label: "Medical Records" },
+  { path: "/prescriptions", icon: "💊", label: "Prescriptions" },
+  { path: "/insurance", icon: "🏥", label: "Insurance" },
   { path: "/test-results", icon: "🧪", label: "Test Results" },
   { path: "/account", icon: "👤", label: "Account" },
   { path: "/billing", icon: "💳", label: "Billing" },

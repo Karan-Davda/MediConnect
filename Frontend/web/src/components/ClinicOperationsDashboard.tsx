@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../config/api';
 import './ClinicOperationsDashboard.css';
 
 interface CheckIn {
@@ -133,10 +134,10 @@ const ClinicOperationsDashboard: React.FC = () => {
       const headers = { 'Authorization': `Bearer ${token}` };
 
       const [checkInsRes, walkInsRes, waitlistsRes, statusRes] = await Promise.all([
-        fetch(`http://localhost:3001/api/clinic-operations/check-ins?clinicId=${clinicId}`, { headers }),
-        fetch(`http://localhost:3001/api/clinic-operations/walk-ins?clinicId=${clinicId}`, { headers }),
-        fetch(`http://localhost:3001/api/clinic-operations/waitlist?clinicId=${clinicId}`, { headers }),
-        fetch(`http://localhost:3001/api/clinic-operations/clinic-status/${clinicId}`, { headers })
+        fetch(apiUrl(`clinic-operations/check-ins?clinicId=${clinicId}`), { headers }),
+        fetch(apiUrl(`clinic-operations/walk-ins?clinicId=${clinicId}`), { headers }),
+        fetch(apiUrl(`clinic-operations/waitlist?clinicId=${clinicId}`), { headers }),
+        fetch(apiUrl(`clinic-operations/clinic-status/${clinicId}`), { headers })
       ]);
 
       if (checkInsRes.ok) setCheckIns(await checkInsRes.json());
@@ -153,7 +154,7 @@ const ClinicOperationsDashboard: React.FC = () => {
       const token = localStorage.getItem('token');
       if (!token) return;
 
-      const response = await fetch('http://localhost:3001/api/clinic-operations/check-in', {
+      const response = await fetch(apiUrl('clinic-operations/check-in'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -186,7 +187,7 @@ const ClinicOperationsDashboard: React.FC = () => {
       const token = localStorage.getItem('token');
       if (!token) return;
 
-      const response = await fetch('http://localhost:3001/api/clinic-operations/walk-ins', {
+      const response = await fetch(apiUrl('clinic-operations/walk-ins'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -221,7 +222,7 @@ const ClinicOperationsDashboard: React.FC = () => {
       const token = localStorage.getItem('token');
       if (!token) return;
 
-      const response = await fetch('http://localhost:3001/api/clinic-operations/waitlist', {
+      const response = await fetch(apiUrl('clinic-operations/waitlist'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -259,8 +260,8 @@ const ClinicOperationsDashboard: React.FC = () => {
       if (!token) return;
 
       const endpoint = type === 'checkin'
-        ? `http://localhost:3001/api/clinic-operations/check-ins/${id}/status`
-        : `http://localhost:3001/api/clinic-operations/walk-ins/${id}/status`;
+        ? apiUrl(`clinic-operations/check-ins/${id}/status`)
+        : apiUrl(`clinic-operations/walk-ins/${id}/status`);
 
       await fetch(endpoint, {
         method: 'PUT',
@@ -282,7 +283,7 @@ const ClinicOperationsDashboard: React.FC = () => {
       const token = localStorage.getItem('token');
       if (!token) return;
 
-      await fetch(`http://localhost:3001/api/clinic-operations/waitlist/${id}`, {
+      await fetch(apiUrl(`clinic-operations/waitlist/${id}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
