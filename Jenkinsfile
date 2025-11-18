@@ -151,7 +151,7 @@ fi
             ],
             QA : [
               branch: 'QA',
-              host:   'QA_HOST_IP_OR_DNS_HERE',  // TODO: replace when QA EC2 is ready
+              host:   '18.218.76.209',  // TODO: replace when QA EC2 is ready
               cred:   'aws-deploy-key',          // reuse same key or create a QA-specific one
               webroot:'/var/www/mediconnect-qa'  // Nginx root on QA
             ]
