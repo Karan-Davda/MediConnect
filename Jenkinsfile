@@ -11,11 +11,15 @@ pipeline {
   }
 
   parameters {
-    booleanParam(name: 'RUN_DEPLOY', defaultValue: true, description: 'Run deploy step when the branch matches an environment (main→Dev, qa→QA)')
+    booleanParam(
+      name: 'RUN_DEPLOY',
+      defaultValue: true,
+      description: 'Run deploy step when the branch matches an environment (main→Dev, QA→QA)'
+    )
     choice(
       name: 'FORCE_ENV',
       choices: ['AUTO','DEV','QA'],
-      description: 'AUTO = derive from branch (main→DEV, qa→QA). Override only if needed.'
+      description: 'AUTO = derive from branch (main→DEV, QA→QA). Override only if needed.'
     )
   }
 
@@ -137,15 +141,20 @@ fi
     stage('Select Environment') {
       steps {
         script {
+          // *** UPDATE ENV HOSTS / CREDS HERE ***
           def CFG = [
-            DEV: [ branch: 'main',
-                   host:   'ec2-3-22-13-29.us-east-2.compute.amazonaws.com',
-                   cred:   'aws-deploy-key',
-                   webroot:'/var/www/mediconnect' ],
-            QA : [ branch: 'QA',
-                   host:   'ec2-3-144-150-239.us-east-2.compute.amazonaws.com',
-                   cred:   'aws-qa-key',
-                   webroot:'/var/www/mediconnect-qa' ]
+            DEV: [
+              branch: 'main',
+              host:   '3.142.45.51',              // NEW Dev EC2 (public IP or DNS)
+              cred:   'aws-deploy-key',          // Jenkins SSH credential ID (new AWS account)
+              webroot:'/var/www/mediconnect'     // Nginx root on Dev
+            ],
+            QA : [
+              branch: 'QA',
+              host:   'QA_HOST_IP_OR_DNS_HERE',  // TODO: replace when QA EC2 is ready
+              cred:   'aws-deploy-key',          // reuse same key or create a QA-specific one
+              webroot:'/var/www/mediconnect-qa'  // Nginx root on QA
+            ]
           ]
 
           def t = params.FORCE_ENV
@@ -262,7 +271,6 @@ if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
   echo "📦 Installing Node.js 22.x..."
   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
   sudo apt-get install -y nodejs
-  # Update PATH to include Node.js binaries
   export PATH="/usr/bin:$PATH"
 fi
 
@@ -292,7 +300,6 @@ if ! command -v npm &> /dev/null; then
   fi
 fi
 
-# Use full paths to ensure we can find node and npm
 NODE_CMD=$(which node || echo "/usr/bin/node")
 NPM_CMD=$(which npm || echo "/usr/bin/npm")
 
@@ -301,28 +308,23 @@ echo "🔍 npm path: $NPM_CMD"
 echo "🔍 Node.js version: $($NODE_CMD --version 2>&1)"
 echo "🔍 npm version: $($NPM_CMD --version 2>&1)"
 
-# Install dependencies using full path
 echo "📥 Installing backend dependencies..."
 $NPM_CMD install --production || $NPM_CMD install || {
   echo "❌ npm install failed"
   exit 1
 }
 
-# Install PM2 globally if not installed
 if ! command -v pm2 &> /dev/null; then
   echo "📦 Installing PM2..."
   sudo npm install -g pm2
 fi
 
-# Stop existing backend if running
 pm2 stop mediconnect-backend 2>/dev/null || true
 pm2 delete mediconnect-backend 2>/dev/null || true
 
-# Start backend with PM2
 echo "🚀 Starting backend..."
 cd "$BACKEND_DIR"
 
-# Verify server.js exists
 if [ ! -f "server.js" ]; then
   echo "❌ server.js not found in $BACKEND_DIR"
   echo "📂 Contents of $BACKEND_DIR:"
@@ -334,10 +336,8 @@ echo "✅ Found server.js, starting with PM2..."
 pm2 start server.js --name mediconnect-backend
 pm2 save
 
-# Setup PM2 startup (run once)
 pm2 startup systemd -u ubuntu --hp /home/ubuntu 2>/dev/null || true
 
-# Cleanup
 sudo rm -f "$BACKEND_TGZ"
 
 echo "✅ Backend deployed and started at $BACKEND_DIR"
