@@ -1,5 +1,5 @@
 // Test script for Access Control System
-const API_BASE = 'http://localhost:3000';
+const API_BASE = 'http://localhost:3001';
 
 async function testAccessControl() {
   console.log('🧪 Testing Access Control System\n');

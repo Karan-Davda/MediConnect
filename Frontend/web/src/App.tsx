@@ -13,6 +13,8 @@ import MedicalRecords from './pages/MedicalRecords'
 import Prescriptions from './pages/Prescriptions'
 import Insurance from './pages/Insurance'
 import HomeProvider from './pages/HomeProvider'
+import ProcessPayments from './pages/ProcessPayments'
+import Billing from './pages/Billing'
 import './App.css'
 
 function App() {
@@ -30,6 +32,11 @@ function App() {
       <Route path="/access-control" element={<AccessControl />} />
       <Route path="/clinic-operations" element={<ClinicOperations />} />
       <Route path="/medical-records" element={<MedicalRecords />} />
+      <Route path="/prescriptions" element={<Prescriptions />} />
+      <Route path="/insurance" element={<Insurance />} />
+      <Route path="/home-provider" element={<HomeProvider />} />
+      <Route path="/process-payments" element={<ProcessPayments />} />
+      <Route path="/billing" element={<Billing />} />
     </Routes>
   )
 }
