@@ -1,6 +1,6 @@
 // Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev/QA
 
-@Library('mediconnectLib') _
+@Library('mediconnectLib@Dev') _
 import mcSlack
 import mcDeploy
 
