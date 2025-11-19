@@ -1,5 +1,8 @@
 // Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev/QA
+
 @Library('mediconnectLib') _
+import mcSlack
+import mcDeploy
 
 pipeline {
   agent any
@@ -89,7 +92,7 @@ if [ -f "${BACKEND_DIR}/package.json" ]; then
   npm ci || npm install
   popd >/dev/null
 else
-  echo "::notice::Skipping backend deps (no ${BACKEND_DIR}/package.json)"
+  echo "No ${BACKEND_DIR}/package.json — skipping BE deps"
 fi
 """
       }
@@ -121,7 +124,7 @@ rm -f backend.tgz || true
 if [ -f "${BACKEND_DIR}/package.json" ]; then
   pushd "${BACKEND_DIR}" >/dev/null
 
-  echo "📥 Installing backend dependencies for packaging..."
+  echo "Installing backend dependencies for packaging..."
   npm ci || npm install
 
   tar -czf "\$WORKSPACE/backend.tgz" \\
@@ -129,6 +132,7 @@ if [ -f "${BACKEND_DIR}/package.json" ]; then
     server.js \\
     \$( [ -d dist ] && echo dist ) \\
     \$( [ -d src ]  && echo src ) || true
+
   popd >/dev/null
   ls -lh backend.tgz || true
 else
@@ -184,164 +188,8 @@ fi
         }
       }
       steps {
-        withCredentials([sshUserPrivateKey(credentialsId: env.EC2_CRED, keyFileVariable: 'KEYFILE')]) {
-          sh '''#!/usr/bin/env bash
-set -euo pipefail
-source "$WORKSPACE/build_out.env"
-
-# ---------- Frontend ----------
-rm -f mediconnect-dist.zip mediconnect-dist.tar.gz || true
-if command -v zip >/dev/null 2>&1; then
-  (cd "$BUILD_OUT" && zip -r "$WORKSPACE/mediconnect-dist.zip" .)
-  ART="mediconnect-dist.zip"
-else
-  (cd "$BUILD_OUT" && tar -czf "$WORKSPACE/mediconnect-dist.tar.gz" .)
-  ART="mediconnect-dist.tar.gz"
-fi
-ls -lh "$WORKSPACE/$ART"
-
-scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/$ART" "$SSH_USER@$EC2_HOST:/tmp/$ART"
-
-APP_DIR_SAFE="${APP_DIR}"
-ssh -i "$KEYFILE" -o StrictHostKeyChecking=no "$SSH_USER@$EC2_HOST" "APP_DIR=\"$APP_DIR_SAFE\" bash -s" <<'REMOTE'
-set -euo pipefail
-ART_ZIP="/tmp/mediconnect-dist.zip"
-ART_TAR="/tmp/mediconnect-dist.tar.gz"
-
-sudo apt-get update -y >/dev/null 2>&1 || true
-sudo apt-get install -y unzip >/dev/null 2>&1 || true
-
-TMPD="$(mktemp -d /tmp/mediconnect.XXXX)"
-if [ -f "$ART_ZIP" ]; then
-  sudo unzip -q "$ART_ZIP" -d "$TMPD"
-else
-  sudo tar -xzf "$ART_TAR" -C "$TMPD"
-fi
-
-TS="$(date +%s)"
-if [ -d "$APP_DIR" ]; then
-  sudo mv "$APP_DIR" "${APP_DIR}.bak.$TS"
-fi
-sudo mkdir -p "$(dirname "$APP_DIR")"
-sudo mv "$TMPD" "$APP_DIR"
-
-sudo chown -R www-data:www-data "$APP_DIR"
-sudo find "$APP_DIR" -type d -exec chmod 755 {} +
-sudo find "$APP_DIR" -type f -exec chmod 644 {} +
-
-sudo systemctl reload nginx || true
-sudo rm -f "$ART_ZIP" "$ART_TAR" || true
-echo "✅ Deployed static frontend to $APP_DIR"
-REMOTE
-
-# ---------- Backend ----------
-if [ -f "$WORKSPACE/backend.tgz" ]; then
-  echo "📦 Deploying backend..."
-  scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/backend.tgz" "$SSH_USER@$EC2_HOST:/tmp/backend.tgz"
-
-  BACKEND_DIR="/opt/mediconnect-backend"
-  ssh -i "$KEYFILE" -o StrictHostKeyChecking=no "$SSH_USER@$EC2_HOST" "BACKEND_DIR=\"$BACKEND_DIR\" bash -s" <<'REMOTE_BACKEND'
-set -euo pipefail
-BACKEND_TGZ="/tmp/backend.tgz"
-
-sudo mkdir -p "$BACKEND_DIR"
-sudo chown ubuntu:ubuntu "$BACKEND_DIR"
-
-cd "$BACKEND_DIR"
-if [ -f "$BACKEND_TGZ" ]; then
-  echo "📦 Extracting backend..."
-  sudo tar -xzf "$BACKEND_TGZ"
-  sudo chown -R ubuntu:ubuntu "$BACKEND_DIR"
-else
-  echo "❌ Backend tarball not found"
-  exit 1
-fi
-
-if [ -f "src/routes/access-control.js" ]; then
-  echo "🔧 Fixing access-control.js if needed..."
-  sed -i 's/let usersList = getUsers();/let usersList = users;/g' src/routes/access-control.js || true
-fi
-
-if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
-  echo "📦 Installing Node.js 22.x..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-  sudo apt-get install -y nodejs
-  export PATH="/usr/bin:$PATH"
-fi
-
-if ! command -v node &> /dev/null; then
-  echo "❌ Node.js not found, checking common locations..."
-  if [ -f "/usr/bin/node" ]; then
-    export PATH="/usr/bin:$PATH"
-  elif [ -f "/usr/local/bin/node" ]; then
-    export PATH="/usr/local/bin:$PATH"
-  else
-    echo "❌ Node.js installation failed"
-    exit 1
-  fi
-fi
-
-if ! command -v npm &> /dev/null; then
-  echo "❌ npm not found, checking common locations..."
-  if [ -f "/usr/bin/npm" ]; then
-    export PATH="/usr/bin:$PATH"
-  elif [ -f "/usr/local/bin/npm" ]; then
-    export PATH="/usr/local/bin:$PATH"
-  else
-    echo "⚠️ npm not found, installing npm separately..."
-    sudo apt-get install -y npm
-    export PATH="/usr/bin:$PATH"
-  fi
-fi
-
-NODE_CMD=\$(which node || echo "/usr/bin/node")
-NPM_CMD=\$(which npm || echo "/usr/bin/npm")
-
-echo "🔍 Node.js path: $NODE_CMD"
-echo "🔍 npm path: $NPM_CMD"
-echo "🔍 Node.js version: $($NODE_CMD --version 2>&1)"
-echo "🔍 npm version: $($NPM_CMD --version 2>&1)"
-
-echo "📥 Installing backend dependencies..."
-$NPM_CMD install --production || $NPM_CMD install || {
-  echo "❌ npm install failed"
-  exit 1
-}
-
-if ! command -v pm2 &> /dev/null; then
-  echo "📦 Installing PM2..."
-  sudo npm install -g pm2
-fi
-
-pm2 stop mediconnect-backend 2>/dev/null || true
-pm2 delete mediconnect-backend 2>/dev/null || true
-
-echo "🚀 Starting backend..."
-cd "$BACKEND_DIR"
-
-if [ ! -f "server.js" ]; then
-  echo "❌ server.js not found in $BACKEND_DIR"
-  echo "📂 Contents of $BACKEND_DIR:"
-  ls -la "$BACKEND_DIR"
-  exit 1
-fi
-
-echo "✅ Found server.js, starting with PM2..."
-pm2 start server.js --name mediconnect-backend
-pm2 save
-
-pm2 startup systemd -u ubuntu --hp /home/ubuntu 2>/dev/null || true
-
-sudo rm -f "$BACKEND_TGZ"
-
-echo "✅ Backend deployed and started at $BACKEND_DIR"
-echo "🔍 Backend status:"
-pm2 list
-REMOTE_BACKEND
-else
-  echo "⚠️ backend.tgz not found, skipping backend deployment"
-fi
-'''
+        script {
+          mcDeploy.deployFrontendAndBackend()
         }
       }
     }
@@ -352,15 +200,7 @@ fi
       echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed to ${env.TARGET_ENV}"
       script {
         try {
-          mcSlack(
-            'success',
-            env.TARGET_ENV,
-            env.GIT_COMMIT_SHORT,
-            env.GIT_COMMIT_SUBJECT,
-            env.BUILD_URL,
-            env.JOB_NAME,
-            env.BRANCH_NAME
-          )
+          mcSlack.notifySuccess(commitSubject: env.GIT_COMMIT_SUBJECT)
         } catch (e) {
           echo "Slack not configured: ${e.message}"
         }
@@ -370,15 +210,7 @@ fi
       echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed (env=${env.TARGET_ENV})"
       script {
         try {
-          mcSlack(
-            'failure',
-            env.TARGET_ENV ?: 'N/A',
-            env.GIT_COMMIT_SHORT ?: 'unknown',
-            env.GIT_COMMIT_SUBJECT ?: 'Build failed',
-            env.BUILD_URL + 'console',
-            env.JOB_NAME,
-            env.BRANCH_NAME
-          )
+          mcSlack.notifyFailure(commitSubject: env.GIT_COMMIT_SUBJECT)
         } catch (e) {
           echo "Slack not configured: ${e.message}"
         }
