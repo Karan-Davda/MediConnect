@@ -1,4 +1,5 @@
 // Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev/QA
+@Library('mediconnectLib') _
 
 pipeline {
   agent any
@@ -38,10 +39,11 @@ pipeline {
         checkout scm
         script {
           env.GIT_COMMIT_SHORT   = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-          // subject (single line)
           env.GIT_COMMIT_SUBJECT = sh(script: 'git log -1 --pretty=%s',     returnStdout: true).trim()
-          // full body (sanitize control chars to be safe for Slack)
-          env.GIT_COMMIT_MSG     = sh(script: "git log -1 --pretty=%B | tr -d '\\000-\\031\\177'", returnStdout: true).trim()
+          env.GIT_COMMIT_MSG     = sh(
+            script: "git log -1 --pretty=%B | tr -d '\\000-\\031\\177'",
+            returnStdout: true
+          ).trim()
 
           echo "Commit: ${env.GIT_COMMIT_SHORT}"
           echo "Subject: ${env.GIT_COMMIT_SUBJECT}"
@@ -87,7 +89,7 @@ if [ -f "${BACKEND_DIR}/package.json" ]; then
   npm ci || npm install
   popd >/dev/null
 else
-  echo "No ${BACKEND_DIR}/package.json — skipping BE deps"
+  echo "::notice::Skipping backend deps (no ${BACKEND_DIR}/package.json)"
 fi
 """
       }
@@ -118,12 +120,10 @@ export NVM_DIR="\$HOME/.nvm"; . "\$NVM_DIR/nvm.sh"; nvm use ${NODE_MAJOR} >/dev/
 rm -f backend.tgz || true
 if [ -f "${BACKEND_DIR}/package.json" ]; then
   pushd "${BACKEND_DIR}" >/dev/null
-  
-  # Ensure dependencies are installed before packaging
+
   echo "📥 Installing backend dependencies for packaging..."
   npm ci || npm install
-  
-  # Package backend
+
   tar -czf "\$WORKSPACE/backend.tgz" \\
     package.json package-lock.json \\
     server.js \\
@@ -141,19 +141,18 @@ fi
     stage('Select Environment') {
       steps {
         script {
-          // *** UPDATE ENV HOSTS / CREDS HERE ***
           def CFG = [
             DEV: [
               branch: 'main',
-              host:   '3.142.45.51',              // NEW Dev EC2 (public IP or DNS)
-              cred:   'aws-deploy-key',          // Jenkins SSH credential ID (new AWS account)
-              webroot:'/var/www/mediconnect'     // Nginx root on Dev
+              host:   '3.142.45.51',
+              cred:   'aws-deploy-key',
+              webroot:'/var/www/mediconnect'
             ],
             QA : [
               branch: 'QA',
-              host:   '18.218.76.209',  // TODO: replace when QA EC2 is ready
-              cred:   'aws-deploy-key',          // reuse same key or create a QA-specific one
-              webroot:'/var/www/mediconnect-qa'  // Nginx root on QA
+              host:   '18.218.76.209',
+              cred:   'aws-deploy-key',
+              webroot:'/var/www/mediconnect-qa'
             ]
           ]
 
@@ -190,7 +189,7 @@ fi
 set -euo pipefail
 source "$WORKSPACE/build_out.env"
 
-# Deploy Frontend
+# ---------- Frontend ----------
 rm -f mediconnect-dist.zip mediconnect-dist.tar.gz || true
 if command -v zip >/dev/null 2>&1; then
   (cd "$BUILD_OUT" && zip -r "$WORKSPACE/mediconnect-dist.zip" .)
@@ -235,7 +234,7 @@ sudo rm -f "$ART_ZIP" "$ART_TAR" || true
 echo "✅ Deployed static frontend to $APP_DIR"
 REMOTE
 
-# Deploy Backend
+# ---------- Backend ----------
 if [ -f "$WORKSPACE/backend.tgz" ]; then
   echo "📦 Deploying backend..."
   scp -i "$KEYFILE" -o StrictHostKeyChecking=no "$WORKSPACE/backend.tgz" "$SSH_USER@$EC2_HOST:/tmp/backend.tgz"
@@ -245,11 +244,9 @@ if [ -f "$WORKSPACE/backend.tgz" ]; then
 set -euo pipefail
 BACKEND_TGZ="/tmp/backend.tgz"
 
-# Create backend directory
 sudo mkdir -p "$BACKEND_DIR"
 sudo chown ubuntu:ubuntu "$BACKEND_DIR"
 
-# Extract backend
 cd "$BACKEND_DIR"
 if [ -f "$BACKEND_TGZ" ]; then
   echo "📦 Extracting backend..."
@@ -260,13 +257,11 @@ else
   exit 1
 fi
 
-# Fix the getUsers() error if it exists
 if [ -f "src/routes/access-control.js" ]; then
   echo "🔧 Fixing access-control.js if needed..."
   sed -i 's/let usersList = getUsers();/let usersList = users;/g' src/routes/access-control.js || true
 fi
 
-# Install Node.js if not available (use system-wide installation)
 if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
   echo "📦 Installing Node.js 22.x..."
   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
@@ -274,7 +269,6 @@ if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
   export PATH="/usr/bin:$PATH"
 fi
 
-# Verify Node.js and npm are available
 if ! command -v node &> /dev/null; then
   echo "❌ Node.js not found, checking common locations..."
   if [ -f "/usr/bin/node" ]; then
@@ -300,8 +294,8 @@ if ! command -v npm &> /dev/null; then
   fi
 fi
 
-NODE_CMD=$(which node || echo "/usr/bin/node")
-NPM_CMD=$(which npm || echo "/usr/bin/npm")
+NODE_CMD=\$(which node || echo "/usr/bin/node")
+NPM_CMD=\$(which npm || echo "/usr/bin/npm")
 
 echo "🔍 Node.js path: $NODE_CMD"
 echo "🔍 npm path: $NPM_CMD"
@@ -358,34 +352,36 @@ fi
       echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed to ${env.TARGET_ENV}"
       script {
         try {
-          slackSend(
-            color: '#2EB67D',
-            message:
-              "*${env.GIT_COMMIT_SUBJECT}*\n" + // commit subject on top
-              "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
-              (env.TARGET_ENV ? "Env: *${env.TARGET_ENV}*\n" : "") +
-              "Branch: *${env.BRANCH_NAME}*\n" +
-              "Commit: `${env.GIT_COMMIT_SHORT}`\n" +
-              "<${env.BUILD_URL}|View Console Output>"
+          mcSlack(
+            'success',
+            env.TARGET_ENV,
+            env.GIT_COMMIT_SHORT,
+            env.GIT_COMMIT_SUBJECT,
+            env.BUILD_URL,
+            env.JOB_NAME,
+            env.BRANCH_NAME
           )
-        } catch (e) { echo "Slack not configured: ${e.message}" }
+        } catch (e) {
+          echo "Slack not configured: ${e.message}"
+        }
       }
     }
     failure {
       echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed (env=${env.TARGET_ENV})"
       script {
         try {
-          slackSend(
-            color: '#E01E5A',
-            message:
-              "*${env.GIT_COMMIT_SUBJECT ?: 'Build failed'}*\n" +
-              "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
-              (env.TARGET_ENV ? "Env: *${env.TARGET_ENV}*\n" : "") +
-              "Branch: *${env.BRANCH_NAME}*\n" +
-              "Commit: `${env.GIT_COMMIT_SHORT}`\n" +
-              "<${env.BUILD_URL}console|View Console Output>"
+          mcSlack(
+            'failure',
+            env.TARGET_ENV ?: 'N/A',
+            env.GIT_COMMIT_SHORT ?: 'unknown',
+            env.GIT_COMMIT_SUBJECT ?: 'Build failed',
+            env.BUILD_URL + 'console',
+            env.JOB_NAME,
+            env.BRANCH_NAME
           )
-        } catch (e) { echo "Slack not configured: ${e.message}" }
+        } catch (e) {
+          echo "Slack not configured: ${e.message}"
+        }
       }
     }
     always {
