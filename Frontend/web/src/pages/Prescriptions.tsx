@@ -206,6 +206,30 @@ const Prescriptions: React.FC = () => {
       const checked = (e.target as HTMLInputElement).checked;
       setFormData(prev => ({ ...prev, [name]: checked }));
     } else {
+      if (name === 'dosage') {
+        const dosagePattern = /^[0-9]*\.?[0-9]*$/;
+        if (value === '' || dosagePattern.test(value)) {
+          setFormData(prev => ({ ...prev, [name]: value }));
+        }
+        return;
+      }
+
+      if (name === 'frequency') {
+        const frequencyPattern = /^[0-9]*\.?[0-9]*\s*(times?|x)?\s*(per|a|\/)?(\s*(day|daily|week|weekly|hour|hourly|month|monthly))?$/i;
+        if (value === '' || frequencyPattern.test(value) || /^[0-9]*$/.test(value)) {
+          setFormData(prev => ({ ...prev, [name]: value }));
+        }
+        return;
+      }
+
+      if (name === 'duration') {
+        const durationPattern = /^[0-9]*\.?[0-9]*\s*(day|days|week|weeks|month|months|year|years)?$/i;
+        if (value === '' || durationPattern.test(value) || /^[0-9]*$/.test(value)) {
+          setFormData(prev => ({ ...prev, [name]: value }));
+        }
+        return;
+      }
+
       setFormData(prev => ({ ...prev, [name]: value }));
     }
   };
@@ -215,6 +239,34 @@ const Prescriptions: React.FC = () => {
     setError('');
     setSuccess('');
     setLoading(true);
+
+    if (!formData.patientId || !formData.medicationName || !formData.dosage ||
+        !formData.frequency || !formData.duration || !formData.quantity) {
+      setError('Please fill in all required fields');
+      setLoading(false);
+      return;
+    }
+
+    const dosagePattern = /^[0-9]+\.?[0-9]*$/;
+    if (!dosagePattern.test(formData.dosage)) {
+      setError('Please enter a valid dosage (numbers only)');
+      setLoading(false);
+      return;
+    }
+
+    const frequencyPattern = /^[0-9]+\.?[0-9]*\s*(times?|x)?\s*(per|a|\/)?(\s*(day|daily|week|weekly|hour|hourly|month|monthly))?$/i;
+    if (!frequencyPattern.test(formData.frequency) && !/^[0-9]+$/.test(formData.frequency)) {
+      setError('Please enter a valid frequency (e.g., "3 times daily" or "2")');
+      setLoading(false);
+      return;
+    }
+
+    const durationPattern = /^[0-9]+\.?[0-9]*\s*(day|days|week|weeks|month|months|year|years)$/i;
+    if (!durationPattern.test(formData.duration) && !/^[0-9]+$/.test(formData.duration)) {
+      setError('Please enter a valid duration (e.g., "7 days" or "2 weeks")');
+      setLoading(false);
+      return;
+    }
 
     try {
       const url = editingPrescriptionId

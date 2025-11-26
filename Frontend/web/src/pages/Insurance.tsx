@@ -201,6 +201,28 @@ const Insurance: React.FC = () => {
     const { name, value, type } = e.target;
     const checked = (e.target as HTMLInputElement).checked;
 
+    if (name === 'insurancePhone') {
+      const phonePattern = /^[0-9\s\-()]*$/;
+      if (value === '' || phonePattern.test(value)) {
+        setFormData(prev => ({
+          ...prev,
+          [name]: value
+        }));
+      }
+      return;
+    }
+
+    if (name === 'rxBin') {
+      const binPattern = /^[0-9]*$/;
+      if (value === '' || binPattern.test(value)) {
+        setFormData(prev => ({
+          ...prev,
+          [name]: value
+        }));
+      }
+      return;
+    }
+
     setFormData(prev => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value
@@ -212,6 +234,24 @@ const Insurance: React.FC = () => {
     setLoading(true);
     setError('');
     setSuccess('');
+
+    if (formData.insurancePhone && formData.insurancePhone.trim() !== '') {
+      const phonePattern = /^[0-9\s\-()]+$/;
+      if (!phonePattern.test(formData.insurancePhone)) {
+        setError('Insurance Phone must contain only numbers');
+        setLoading(false);
+        return;
+      }
+    }
+
+    if (formData.rxBin && formData.rxBin.trim() !== '') {
+      const binPattern = /^[0-9]+$/;
+      if (!binPattern.test(formData.rxBin)) {
+        setError('Prescription BIN must contain only numbers');
+        setLoading(false);
+        return;
+      }
+    }
 
     try {
       const url = editingInsuranceId

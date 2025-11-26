@@ -87,6 +87,7 @@ const ClinicOperationsDashboard: React.FC = () => {
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [showWalkInModal, setShowWalkInModal] = useState(false);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const clinicId = '1';
 
@@ -150,6 +151,13 @@ const ClinicOperationsDashboard: React.FC = () => {
   };
 
   const handleCheckIn = async () => {
+    setErrorMessage('');
+
+    if (!newCheckIn.patientId || newCheckIn.patientId.trim() === '') {
+      setErrorMessage('Patient ID is required');
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       if (!token) return;
@@ -168,6 +176,7 @@ const ClinicOperationsDashboard: React.FC = () => {
 
       if (response.ok) {
         setShowCheckInModal(false);
+        setErrorMessage('');
         setNewCheckIn({
           patientId: '',
           appointmentId: '',
@@ -183,6 +192,18 @@ const ClinicOperationsDashboard: React.FC = () => {
   };
 
   const handleWalkIn = async () => {
+    setErrorMessage('');
+
+    if (!newWalkIn.patientName || newWalkIn.patientName.trim() === '') {
+      setErrorMessage('Patient Name is required');
+      return;
+    }
+
+    if (!newWalkIn.reason || newWalkIn.reason.trim() === '') {
+      setErrorMessage('Reason for Visit is required');
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       if (!token) return;
@@ -201,6 +222,7 @@ const ClinicOperationsDashboard: React.FC = () => {
 
       if (response.ok) {
         setShowWalkInModal(false);
+        setErrorMessage('');
         setNewWalkIn({
           patientName: '',
           patientEmail: '',
@@ -218,6 +240,18 @@ const ClinicOperationsDashboard: React.FC = () => {
   };
 
   const handleWaitlist = async () => {
+    setErrorMessage('');
+
+    if (!newWaitlist.patientName || newWaitlist.patientName.trim() === '') {
+      setErrorMessage('Patient Name is required');
+      return;
+    }
+
+    if (!newWaitlist.reason || newWaitlist.reason.trim() === '') {
+      setErrorMessage('Reason is required');
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       if (!token) return;
@@ -236,6 +270,7 @@ const ClinicOperationsDashboard: React.FC = () => {
 
       if (response.ok) {
         setShowWaitlistModal(false);
+        setErrorMessage('');
         setNewWaitlist({
           patientName: '',
           patientEmail: '',
@@ -577,13 +612,18 @@ const ClinicOperationsDashboard: React.FC = () => {
       )}
 
       {showCheckInModal && (
-        <div className="modal-overlay" onClick={() => setShowCheckInModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowCheckInModal(false); setErrorMessage(''); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Check In Patient</h2>
-              <button className="close-btn" onClick={() => setShowCheckInModal(false)}>×</button>
+              <button className="close-btn" onClick={() => { setShowCheckInModal(false); setErrorMessage(''); }}>×</button>
             </div>
             <div className="modal-body">
+              {errorMessage && (
+                <div className="error-message">
+                  {errorMessage}
+                </div>
+              )}
               <div className="form-group">
                 <label>Patient ID*</label>
                 <input
@@ -629,7 +669,7 @@ const ClinicOperationsDashboard: React.FC = () => {
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowCheckInModal(false)}>
+              <button className="btn-secondary" onClick={() => { setShowCheckInModal(false); setErrorMessage(''); }}>
                 Cancel
               </button>
               <button className="btn-primary" onClick={handleCheckIn}>
@@ -641,13 +681,18 @@ const ClinicOperationsDashboard: React.FC = () => {
       )}
 
       {showWalkInModal && (
-        <div className="modal-overlay" onClick={() => setShowWalkInModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowWalkInModal(false); setErrorMessage(''); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Register Walk-In Patient</h2>
-              <button className="close-btn" onClick={() => setShowWalkInModal(false)}>×</button>
+              <button className="close-btn" onClick={() => { setShowWalkInModal(false); setErrorMessage(''); }}>×</button>
             </div>
             <div className="modal-body">
+              {errorMessage && (
+                <div className="error-message">
+                  {errorMessage}
+                </div>
+              )}
               <div className="form-group">
                 <label>Patient Name*</label>
                 <input
@@ -709,7 +754,7 @@ const ClinicOperationsDashboard: React.FC = () => {
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowWalkInModal(false)}>
+              <button className="btn-secondary" onClick={() => { setShowWalkInModal(false); setErrorMessage(''); }}>
                 Cancel
               </button>
               <button className="btn-primary" onClick={handleWalkIn}>
@@ -721,13 +766,18 @@ const ClinicOperationsDashboard: React.FC = () => {
       )}
 
       {showWaitlistModal && (
-        <div className="modal-overlay" onClick={() => setShowWaitlistModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowWaitlistModal(false); setErrorMessage(''); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Add to Waitlist</h2>
-              <button className="close-btn" onClick={() => setShowWaitlistModal(false)}>×</button>
+              <button className="close-btn" onClick={() => { setShowWaitlistModal(false); setErrorMessage(''); }}>×</button>
             </div>
             <div className="modal-body">
+              {errorMessage && (
+                <div className="error-message">
+                  {errorMessage}
+                </div>
+              )}
               <div className="form-group">
                 <label>Patient Name*</label>
                 <input
@@ -810,7 +860,7 @@ const ClinicOperationsDashboard: React.FC = () => {
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowWaitlistModal(false)}>
+              <button className="btn-secondary" onClick={() => { setShowWaitlistModal(false); setErrorMessage(''); }}>
                 Cancel
               </button>
               <button className="btn-primary" onClick={handleWaitlist}>
