@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from '../context/AuthContext';
 import Sidebar from "../components/Sidebar";
 import "./Account.css"; 
 
@@ -55,10 +56,11 @@ const DEFAULT_LOCAL_USER: User = {
 };
 
 const Account: React.FC = () => {
+  const { isAuthenticated, user, hasRole } = useAuth();
+  const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const toggleSidebar = () => setSidebarCollapsed((s) => !s);
 
-  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingSection, setEditingSection] = useState<
     "personal" | "medical" | "notifications" | "privacy" | null
@@ -67,7 +69,27 @@ const Account: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const navigate = useNavigate();
+
+  // Authorization checks - all authenticated users can access account
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+  }, [isAuthenticated, navigate]);
+
+  // Show loading state while checking authentication
+  if (!isAuthenticated) {
+    return (
+      <div className="dashboard-container">
+        <div className="main-content">
+          <div className="dashboard-content">
+            <p>Loading...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -79,10 +101,21 @@ const Account: React.FC = () => {
         if (!res.ok) throw new Error(`Failed to load profile (${res.status})`);
         const data: User = await res.json();
         if (!mounted) return;
-        data.role = "Patient";
+        // Use the role from AuthContext if available, otherwise fallback to API response
+        data.role = user?.role || data.role || "Patient";
         setUser(data);
       } catch {
-        // local fallback (no backend)
+        // local fallback (no backend) - use AuthContext user data
+        if (user) {
+          const fallbackUser: User = {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            // ...other fields with defaults
+          };
+          setUser(fallbackUser);
+        }
         setError(null);
       } finally {
         if (mounted) setLoading(false);
@@ -92,7 +125,7 @@ const Account: React.FC = () => {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [user]);
 
   function getInitials(name = "") {
     const parts = name.trim().split(/\s+/);
@@ -293,6 +326,8 @@ const Account: React.FC = () => {
   }
 
   const displayUser: User = user ?? DEFAULT_LOCAL_USER;
+  // Use the authenticated user's role from AuthContext
+  const userRole = user?.role || displayUser.role || "Patient";
 
   return (
     <div className="dashboard-container">
@@ -340,7 +375,7 @@ const Account: React.FC = () => {
             <div style={{ flex: 1 }}>
               <h1 style={{ margin: 0 }}>{displayUser.name}</h1>
               <p style={{ margin: "6px 0", color: "#666" }}>{displayUser.email}</p>
-              <small style={{ color: "#888" }}>Role: Patient</small>
+              <small style={{ color: "#888" }}>Role: {userRole}</small>
             </div>
 
             <div style={{ display: "flex", gap: 8 }}>
@@ -443,101 +478,180 @@ const Account: React.FC = () => {
                 )}
               </div>
 
-              {/* Medical ID */}
-              <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <strong>Medical ID</strong>
-                  <button
-                    onClick={() => {
-                      setEditingSection((s) => (s === "medical" ? null : "medical"));
-                      setForm({ medical: displayUser.medical || {} });
-                    }}
-                  >
-                    {editingSection === "medical" ? "Close" : "Edit"}
-                  </button>
-                </div>
+              {/* Medical ID - Only show for patients */}
+              {hasRole(['patient']) && (
+                <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong>Medical ID</strong>
+                    <button
+                      onClick={() => {
+                        setEditingSection((s) => (s === "medical" ? null : "medical"));
+                        setForm({ medical: displayUser.medical || {} });
+                      }}
+                    >
+                      {editingSection === "medical" ? "Close" : "Edit"}
+                    </button>
+                  </div>
 
-                {!editingSection || editingSection !== "medical" ? (
-                  <div style={{ marginTop: 10 }}>
-                    <p style={{ margin: "6px 0" }}>
-                      <strong>Insurance:</strong>{" "}
-                      {displayUser.medical?.insuranceProvider ?? "—"}
-                    </p>
-                    <p style={{ margin: "6px 0" }}>
-                      <strong>Policy #:</strong>{" "}
-                      {displayUser.medical?.insuranceNumber ?? "—"}
-                    </p>
-                    <p style={{ margin: "6px 0" }}>
-                      <strong>Primary care:</strong>{" "}
-                      {displayUser.medical?.primaryCare ?? "—"}
-                    </p>
-                    <p style={{ margin: "6px 0" }}>
-                      <strong>Emergency contact:</strong>{" "}
-                      {displayUser.medical?.emergencyContactName ?? "—"}{" "}
-                      {displayUser.medical?.emergencyContactPhone
-                        ? `(${displayUser.medical?.emergencyContactPhone})`
-                        : ""}
-                    </p>
-                  </div>
-                ) : (
-                  <div style={{ marginTop: 10 }}>
-                    <label style={{ display: "block", marginBottom: 8 }}>
-                      <div style={{ fontSize: 13 }}>Insurance provider</div>
-                      <input
-                        value={form.medical?.insuranceProvider ?? ""}
-                        onChange={(e) => onMedicalChange("insuranceProvider", e.target.value)}
-                        style={{ width: "100%", padding: 8, marginTop: 6 }}
-                      />
-                    </label>
-                    <label style={{ display: "block", marginBottom: 8 }}>
-                      <div style={{ fontSize: 13 }}>Insurance number</div>
-                      <input
-                        value={form.medical?.insuranceNumber ?? ""}
-                        onChange={(e) => onMedicalChange("insuranceNumber", e.target.value)}
-                        style={{ width: "100%", padding: 8, marginTop: 6 }}
-                      />
-                    </label>
-                    <label style={{ display: "block", marginBottom: 8 }}>
-                      <div style={{ fontSize: 13 }}>Primary care physician</div>
-                      <input
-                        value={form.medical?.primaryCare ?? ""}
-                        onChange={(e) => onMedicalChange("primaryCare", e.target.value)}
-                        style={{ width: "100%", padding: 8, marginTop: 6 }}
-                      />
-                    </label>
-                    <label style={{ display: "block", marginBottom: 8 }}>
-                      <div style={{ fontSize: 13 }}>Emergency contact (name)</div>
-                      <input
-                        value={form.medical?.emergencyContactName ?? ""}
-                        onChange={(e) => onMedicalChange("emergencyContactName", e.target.value)}
-                        style={{ width: "100%", padding: 8, marginTop: 6 }}
-                      />
-                    </label>
-                    <label style={{ display: "block", marginBottom: 8 }}>
-                      <div style={{ fontSize: 13 }}>Emergency contact (phone)</div>
-                      <input
-                        value={form.medical?.emergencyContactPhone ?? ""}
-                        onChange={(e) => onMedicalChange("emergencyContactPhone", e.target.value)}
-                        style={{ width: "100%", padding: 8, marginTop: 6 }}
-                      />
-                    </label>
-                    <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                      <button onClick={saveSection} disabled={saving}>
-                        {saving ? "Saving…" : "Save"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingSection(null);
-                          setForm({});
-                        }}
-                        disabled={saving}
-                      >
-                        Cancel
-                      </button>
+                  {!editingSection || editingSection !== "medical" ? (
+                    <div style={{ marginTop: 10 }}>
+                      <p style={{ margin: "6px 0" }}>
+                        <strong>Insurance:</strong>{" "}
+                        {displayUser.medical?.insuranceProvider ?? "—"}
+                      </p>
+                      <p style={{ margin: "6px 0" }}>
+                        <strong>Policy #:</strong>{" "}
+                        {displayUser.medical?.insuranceNumber ?? "—"}
+                      </p>
+                      <p style={{ margin: "6px 0" }}>
+                        <strong>Primary care:</strong>{" "}
+                        {displayUser.medical?.primaryCare ?? "—"}
+                      </p>
+                      <p style={{ margin: "6px 0" }}>
+                        <strong>Emergency contact:</strong>{" "}
+                        {displayUser.medical?.emergencyContactName ?? "—"}{" "}
+                        {displayUser.medical?.emergencyContactPhone
+                          ? `(${displayUser.medical?.emergencyContactPhone})`
+                          : ""}
+                      </p>
                     </div>
+                  ) : (
+                    <div style={{ marginTop: 10 }}>
+                      <label style={{ display: "block", marginBottom: 8 }}>
+                        <div style={{ fontSize: 13 }}>Insurance provider</div>
+                        <input
+                          value={form.medical?.insuranceProvider ?? ""}
+                          onChange={(e) => onMedicalChange("insuranceProvider", e.target.value)}
+                          style={{ width: "100%", padding: 8, marginTop: 6 }}
+                        />
+                      </label>
+                      <label style={{ display: "block", marginBottom: 8 }}>
+                        <div style={{ fontSize: 13 }}>Insurance number</div>
+                        <input
+                          value={form.medical?.insuranceNumber ?? ""}
+                          onChange={(e) => onMedicalChange("insuranceNumber", e.target.value)}
+                          style={{ width: "100%", padding: 8, marginTop: 6 }}
+                        />
+                      </label>
+                      <label style={{ display: "block", marginBottom: 8 }}>
+                        <div style={{ fontSize: 13 }}>Primary care physician</div>
+                        <input
+                          value={form.medical?.primaryCare ?? ""}
+                          onChange={(e) => onMedicalChange("primaryCare", e.target.value)}
+                          style={{ width: "100%", padding: 8, marginTop: 6 }}
+                        />
+                      </label>
+                      <label style={{ display: "block", marginBottom: 8 }}>
+                        <div style={{ fontSize: 13 }}>Emergency contact (name)</div>
+                        <input
+                          value={form.medical?.emergencyContactName ?? ""}
+                          onChange={(e) => onMedicalChange("emergencyContactName", e.target.value)}
+                          style={{ width: "100%", padding: 8, marginTop: 6 }}
+                        />
+                      </label>
+                      <label style={{ display: "block", marginBottom: 8 }}>
+                        <div style={{ fontSize: 13 }}>Emergency contact (phone)</div>
+                        <input
+                          value={form.medical?.emergencyContactPhone ?? ""}
+                          onChange={(e) => onMedicalChange("emergencyContactPhone", e.target.value)}
+                          style={{ width: "100%", padding: 8, marginTop: 6 }}
+                        />
+                      </label>
+                      <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                        <button onClick={saveSection} disabled={saving}>
+                          {saving ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingSection(null);
+                            setForm({});
+                          }}
+                          disabled={saving}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Professional Information - Only show for doctors and admins */}
+              {hasRole(['doctor', 'admin']) && (
+                <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong>Professional Information</strong>
+                    <button
+                      onClick={() => {
+                        setEditingSection((s) => (s === "professional" ? null : "professional"));
+                        setForm({
+                          // Add professional fields if they exist in the user model
+                          specialty: displayUser.specialty || "",
+                          licenseNumber: displayUser.licenseNumber || "",
+                          department: displayUser.department || "",
+                        });
+                      }}
+                    >
+                      {editingSection === "professional" ? "Close" : "Edit"}
+                    </button>
                   </div>
-                )}
-              </div>
+
+                  {!editingSection || editingSection !== "professional" ? (
+                    <div style={{ marginTop: 10 }}>
+                      <p style={{ margin: "6px 0" }}>
+                        <strong>Specialty:</strong> {displayUser.specialty ?? "—"}
+                      </p>
+                      <p style={{ margin: "6px 0" }}>
+                        <strong>License #:</strong> {displayUser.licenseNumber ?? "—"}
+                      </p>
+                      <p style={{ margin: "6px 0" }}>
+                        <strong>Department:</strong> {displayUser.department ?? "—"}
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 10 }}>
+                      <label style={{ display: "block", marginBottom: 8 }}>
+                        <div style={{ fontSize: 13 }}>Specialty</div>
+                        <input
+                          value={form.specialty ?? ""}
+                          onChange={(e) => onFieldChange("specialty", e.target.value)}
+                          style={{ width: "100%", padding: 8, marginTop: 6 }}
+                        />
+                      </label>
+                      <label style={{ display: "block", marginBottom: 8 }}>
+                        <div style={{ fontSize: 13 }}>License Number</div>
+                        <input
+                          value={form.licenseNumber ?? ""}
+                          onChange={(e) => onFieldChange("licenseNumber", e.target.value)}
+                          style={{ width: "100%", padding: 8, marginTop: 6 }}
+                        />
+                      </label>
+                      <label style={{ display: "block", marginBottom: 8 }}>
+                        <div style={{ fontSize: 13 }}>Department</div>
+                        <input
+                          value={form.department ?? ""}
+                          onChange={(e) => onFieldChange("department", e.target.value)}
+                          style={{ width: "100%", padding: 8, marginTop: 6 }}
+                        />
+                      </label>
+                      <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                        <button onClick={saveSection} disabled={saving}>
+                          {saving ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingSection(null);
+                            setForm({});
+                          }}
+                          disabled={saving}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Notifications */}
               <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
@@ -601,27 +715,55 @@ const Account: React.FC = () => {
                 </div>
               </div>
 
-              {/* Connected Providers */}
-              <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <strong>Connected Providers</strong>
-                  <button onClick={() => navigate("/account/providers")}>Manage</button>
+              {/* Connected Providers - Only show for patients */}
+              {hasRole(['patient']) && (
+                <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong>Connected Providers</strong>
+                    <button onClick={() => navigate("/account/providers")}>Manage</button>
+                  </div>
+                  <div style={{ marginTop: 10 }}>
+                    {displayUser.connectedProviders && displayUser.connectedProviders.length > 0 ? (
+                      <ul style={{ paddingLeft: 18, margin: 0 }}>
+                        {displayUser.connectedProviders.map((p) => (
+                          <li key={p.id} style={{ marginBottom: 6 }}>
+                            {p.name}
+                            {p.specialty ? ` — ${p.specialty}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p style={{ margin: 0 }}>No providers connected.</p>
+                    )}
+                  </div>
                 </div>
-                <div style={{ marginTop: 10 }}>
-                  {displayUser.connectedProviders && displayUser.connectedProviders.length > 0 ? (
-                    <ul style={{ paddingLeft: 18, margin: 0 }}>
-                      {displayUser.connectedProviders.map((p) => (
-                        <li key={p.id} style={{ marginBottom: 6 }}>
-                          {p.name}
-                          {p.specialty ? ` — ${p.specialty}` : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p style={{ margin: 0 }}>No providers connected.</p>
-                  )}
+              )}
+
+              {/* Patient List - Only show for doctors */}
+              {hasRole(['doctor']) && (
+                <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong>Patient Management</strong>
+                    <button onClick={() => navigate("/clinic-operations")}>View Patients</button>
+                  </div>
+                  <div style={{ marginTop: 10 }}>
+                    <p style={{ margin: 0 }}>Access patient records, appointments, and clinic operations.</p>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* System Administration - Only show for admins */}
+              {hasRole(['admin']) && (
+                <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong>System Administration</strong>
+                    <button onClick={() => navigate("/access-control")}>Access Control</button>
+                  </div>
+                  <div style={{ marginTop: 10 }}>
+                    <p style={{ margin: 0 }}>Manage user roles, permissions, and system settings.</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right column */}
@@ -642,20 +784,23 @@ const Account: React.FC = () => {
                 </div>
               </div>
 
-              <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
-                <p style={{ margin: "6px 0" }}>
-                  <strong>Data sharing consent:</strong>{" "}
-                  {displayUser.dataSharingConsent ? "Allowed" : "Not allowed"}
-                </p>
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button onClick={() => toggleDataSharing(true)} disabled={saving}>
-                    Allow
-                  </button>
-                  <button onClick={() => toggleDataSharing(false)} disabled={saving}>
-                    Revoke
-                  </button>
+              {/* Data sharing consent - Only show for patients */}
+              {hasRole(['patient']) && (
+                <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8, marginBottom: 12 }}>
+                  <p style={{ margin: "6px 0" }}>
+                    <strong>Data sharing consent:</strong>{" "}
+                    {displayUser.dataSharingConsent ? "Allowed" : "Not allowed"}
+                  </p>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <button onClick={() => toggleDataSharing(true)} disabled={saving}>
+                      Allow
+                    </button>
+                    <button onClick={() => toggleDataSharing(false)} disabled={saving}>
+                      Revoke
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div style={{ border: "1px solid #eee", padding: 16, borderRadius: 8 }}>
                 <h3 style={{ marginTop: 0 }}>Support</h3>

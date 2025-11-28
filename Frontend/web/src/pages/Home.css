@@ -30,39 +30,108 @@ body, html {
 
 /* Admin Widget Styles */
 .admin-widget {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background-color: white;
   border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
 .admin-widget:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
 }
 
 .admin-widget .widget-header {
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
+  background-color: white;
+  color: #2d3748;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .admin-widget .widget-title {
-  color: white;
+  color: #2d3748;
 }
 
 .admin-widget .widget-content p {
   margin-bottom: 15px;
-  color: rgba(255, 255, 255, 0.9);
+  color: #4a5568;
+}
+
+/* Admin KPI Row */
+.admin-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.kpi-card {
+  background-color: #f7fafc;
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+  border: 1px solid #e2e8f0;
+}
+
+.kpi-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #718096;
+  margin-bottom: 0.5rem;
+}
+
+.kpi-value {
+  display: block;
+  font-size: 2rem;
+  font-weight: bold;
+  color: #2d3748;
+  margin-bottom: 0.25rem;
+}
+
+.kpi-sub {
+  display: block;
+  font-size: 0.75rem;
+  color: #718096;
+}
+
+/* Admin Operations Grid */
+.admin-ops-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+.admin-ops-column h4 {
+  color: #2d3748;
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
+}
+
+.simple-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.simple-list li {
+  background-color: #f7fafc;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  color: #4a5568;
+  font-size: 0.9rem;
+  border: 1px solid #e2e8f0;
 }
 
 .admin-widget-btn {
   width: 100%;
   padding: 12px 20px;
-  background-color: rgba(255, 255, 255, 0.95);
+  background-color: white;
   color: #667eea;
-  border: none;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
-  fontSize: 16px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -70,16 +139,19 @@ body, html {
   align-items: center;
   justify-content: center;
   gap: 8px;
+  margin-bottom: 0.5rem;
 }
 
 .admin-widget-btn:hover {
-  background-color: white;
-  transform: scale(1.02);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  background-color: #f7fafc;
+  border-color: #cbd5e0;
+  color: #5a67d8;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .admin-widget-btn:active {
-  transform: scale(0.98);
+  transform: translateY(0);
 }
 
 /* Sidebar styles are now in Sidebar.css component */
@@ -209,6 +281,13 @@ body, html {
   font-size: 1rem;
   display: inline-block;
   line-height: 1.5;
+}
+
+/* User Role Display */
+.user-role {
+  color: white;
+  font-size: 0.85rem;
+  font-style: italic;
 }
 
 .login-btn:hover {
@@ -667,4 +746,98 @@ body, html {
 /* Keep other-month dates subdued */
 .calendar-dates span.other-month {
   opacity: 0.4;
+}
+
+/* Provider Dashboard Styles */
+.date-controls {
+  margin-top: 1rem;
+}
+
+.date-controls h4 {
+  color: #2d3748;
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+}
+
+.date-control-buttons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+  flex-wrap: wrap;
+}
+
+.time-input {
+  padding: 0.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.add-availability-btn {
+  background-color: #48bb78;
+  color: white;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.add-availability-btn:hover {
+  background-color: #38a169;
+}
+
+.block-time-btn {
+  background-color: #e53e3e;
+  color: white;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.block-time-btn:hover {
+  background-color: #c53030;
+}
+
+.remove-slot-btn {
+  background-color: #a0aec0;
+  color: white;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.remove-slot-btn:hover {
+  background-color: #718096;
+}
+
+.instructions-text {
+  color: #4a5568;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin-top: 0.5rem;
+}
+
+/* Provider Calendar Additional Styles */
+.calendar-dates span.has-open {
+  border: 2px solid #48bb78;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.calendar-dates span.has-blocked {
+  border: 2px solid #e53e3e;
+  border-radius: 8px;
+  font-weight: 600;
 }

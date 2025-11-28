@@ -1,13 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
 import PatientAppointmentsWidget from "../widgets/PatientAppointmentsWidget";
+import { useCalendar } from "../calendar/useCalendar";
 import './Home.css';
+
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const monthYear = (d: Date) =>
+  d.toLocaleString(undefined, { month: "long", year: "numeric" });
 
 const Home: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { isAuthenticated, user, logout } = useAuth();
+  const [cursor, setCursor] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(iso(new Date()));
+  const [slot, setSlot] = useState("09:00");
+  const { isAuthenticated, user, logout, hasRole } = useAuth();
   const navigate = useNavigate();
 
   const toggleSidebar = () => {
@@ -19,12 +27,445 @@ const Home: React.FC = () => {
     navigate('/login');
   };
 
+  // Role flags
+  const isAdmin = hasRole(['admin', 'clinic_admin']);
+  const isDoctorOrStaff = hasRole(['doctor', 'clinic_staff']);
+  const isProvider = isDoctorOrStaff; // only clinical providers, not admins
+
+  // Calendar functionality for providers (doctors/clinic_staff)
+  const {
+    providers,
+    getAvailability,
+    addAvailability,
+    blockTime,
+    removeAvailability,
+  } = useCalendar();
+
+  // Calendar days calculation for provider interface
+  const days = useMemo(() => {
+    if (!isProvider || !providers || providers.length === 0) return [];
+
+    const providerId = providers[0]?.provider?.id ?? "p1";
+    const provider = providers.find((p) => p.provider.id === providerId) ?? providers[0];
+
+    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const start = new Date(first);
+    start.setDate(first.getDate() - first.getDay());
+
+    return Array.from({ length: 42 }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const k = iso(d);
+
+      const open =
+        (typeof getAvailability === "function"
+          ? getAvailability(providerId, k)
+          : []) ?? [];
+      const blocked = new Set((provider?.blocks?.[k] as string[] | undefined) ?? []);
+
+      return {
+        d,
+        iso: k,
+        open,
+        blocked,
+        other: d.getMonth() !== cursor.getMonth(),
+      };
+    });
+  }, [cursor, providers, getAvailability, isProvider]);
+
+  // Doctor / Provider Dashboard Content
+  const renderDoctorDashboard = () => {
+    if (!providers || providers.length === 0) {
+      return <div className="dashboard-content">Loading provider schedule…</div>;
+    }
+
+    const providerId = providers[0]?.provider?.id ?? "p1";
+    const provider = providers.find((p) => p.provider.id === providerId) ?? providers[0];
+
+    return (
+      <div className="dashboard-content">
+        <div className="widget">
+          <div className="widget-header">
+            <span className="widget-icon">🗓️</span>
+            <h3 className="widget-title">
+              {provider.provider.name} — {provider.provider.specialty}
+            </h3>
+          </div>
+
+          <div className="widget-content">
+            {/* Month grid */}
+            <div className="calendar-section">
+              <div className="calendar-header">
+                <span
+                  className="calendar-nav"
+                  onClick={() =>
+                    setCursor(
+                      new Date(
+                        cursor.getFullYear(),
+                        cursor.getMonth() - 1,
+                        1
+                      )
+                    )
+                  }
+                >
+                  ‹
+                </span>
+                <span className="calendar-month">{monthYear(cursor)}</span>
+                <span
+                  className="calendar-nav"
+                  onClick={() =>
+                    setCursor(
+                      new Date(
+                        cursor.getFullYear(),
+                        cursor.getMonth() + 1,
+                        1
+                      )
+                    )
+                  }
+                >
+                  ›
+                </span>
+              </div>
+
+              <div className="calendar-grid">
+                <div className="calendar-days">
+                  <span>Su</span>
+                  <span>Mo</span>
+                  <span>Tu</span>
+                  <span>We</span>
+                  <span>Th</span>
+                  <span>Fr</span>
+                  <span>Sa</span>
+                </div>
+                <div className="calendar-dates">
+                  {days.map(({ d, iso, open, blocked, other }) => {
+                    const todayISO = new Date().toISOString().slice(0, 10);
+                    const dateState =
+                      iso === todayISO
+                        ? "today"
+                        : new Date(iso) < new Date(todayISO)
+                        ? "past"
+                        : "future";
+
+                    const hasOpen = (open?.length ?? 0) > 0;
+                    const hasBlocked = (blocked?.size ?? 0) > 0;
+
+                    const classNames = [
+                      other ? "other-month" : "",
+                      dateState,
+                      hasOpen ? "has-open" : "",
+                      hasBlocked ? "has-blocked" : "",
+                    ]
+                      .join(" ")
+                      .trim();
+
+                    return (
+                      <span
+                        key={iso}
+                        className={classNames}
+                        onClick={() => setSelectedDate(iso)}
+                        title={`Open: ${
+                          hasOpen ? open.join(", ") : "-"
+                        } | Blocked: ${
+                          hasBlocked
+                            ? Array.from(blocked).join(", ")
+                            : "-"
+                        }`}
+                      >
+                        {d.getDate()}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Controls for selected date */}
+            <div className="date-controls">
+              <h4>Manage {selectedDate}</h4>
+              <div className="date-control-buttons">
+                <input
+                  type="time"
+                  value={slot}
+                  onChange={(e) => setSlot(e.target.value)}
+                  className="time-input"
+                />
+                <button
+                  onClick={() =>
+                    addAvailability(providerId, selectedDate, slot)
+                  }
+                  className="add-availability-btn"
+                >
+                  + Add Availability
+                </button>
+                <button
+                  onClick={() =>
+                    blockTime(providerId, selectedDate, slot)
+                  }
+                  className="block-time-btn"
+                >
+                  Block Time
+                </button>
+                <button
+                  onClick={() =>
+                    removeAvailability(providerId, selectedDate, slot)
+                  }
+                  className="remove-slot-btn"
+                >
+                  Remove Slot
+                </button>
+              </div>
+
+              <p className="instructions-text">
+                • Adding availability opens slots for patients.
+                <br />
+                • Blocking time removes it from bookable inventory.
+                <br />
+                • Changes instantly reflect in the patient dashboard & booking.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Admin Dashboard Content (admin / clinic_admin)
+  const renderAdminDashboard = () => (
+    <div className="dashboard-content">
+      {/* Clinic Snapshot */}
+      <div className="widget admin-widget">
+        <div className="widget-header">
+          <span className="widget-icon">📊</span>
+          <h3 className="widget-title">Clinic Snapshot (Today)</h3>
+        </div>
+        <div className="widget-content admin-kpi-row">
+          <div className="kpi-card">
+            <span className="kpi-label">Appointments</span>
+            <span className="kpi-value">42</span>
+            <span className="kpi-sub">Scheduled</span>
+          </div>
+          <div className="kpi-card">
+            <span className="kpi-label">Checked-In</span>
+            <span className="kpi-value">18</span>
+            <span className="kpi-sub">In Clinic</span>
+          </div>
+          <div className="kpi-card">
+            <span className="kpi-label">Waiting</span>
+            <span className="kpi-value">6</span>
+            <span className="kpi-sub">Lobby</span>
+          </div>
+          <div className="kpi-card">
+            <span className="kpi-label">No-Shows</span>
+            <span className="kpi-value">3</span>
+            <span className="kpi-sub">Today</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Operations & Queues */}
+      <div className="widget admin-widget">
+        <div className="widget-header">
+          <span className="widget-icon">🏥</span>
+          <h3 className="widget-title">Clinic Operations</h3>
+        </div>
+        <div className="widget-content admin-ops-grid">
+          <div className="admin-ops-column">
+            <h4>Check-In / Waitlist</h4>
+            <ul className="simple-list">
+              <li>Patient A — 09:30 — Waiting</li>
+              <li>Patient B — 09:45 — In Room 2</li>
+              <li>Walk-in C — Added to waitlist</li>
+            </ul>
+          </div>
+          <div className="admin-ops-column">
+            <h4>Operational Actions</h4>
+            <button
+              className="admin-widget-btn"
+              onClick={() => navigate('/clinic-operations')}
+            >
+              🏥 Open Clinic Operations Dashboard
+            </button>
+            <button
+              className="admin-widget-btn"
+              onClick={() => navigate('/providers')}
+            >
+              👨‍⚕️ Manage Providers & Schedules
+            </button>
+            <button
+              className="admin-widget-btn"
+              onClick={() => navigate('/billing')}
+            >
+              💳 Billing & Payments
+            </button>
+            <button
+              className="admin-widget-btn"
+              onClick={() => navigate('/reports')}
+            >
+              📑 Reports & Audit Logs
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Staff Overview */}
+      <div className="widget admin-widget">
+        <div className="widget-header">
+          <span className="widget-icon">👥</span>
+          <h3 className="widget-title">On-Duty Staff</h3>
+        </div>
+        <div className="widget-content">
+          <div className="provider-item">
+            <div className="provider-avatar">👤</div>
+            <div className="provider-info">
+              <div className="provider-name">Dr. Example</div>
+              <div className="provider-specialty">Internal Medicine</div>
+            </div>
+            <div className="provider-actions">
+              <span className="action-icon">📅</span>
+              <span className="action-icon">✉️</span>
+            </div>
+          </div>
+          <div className="provider-item">
+            <div className="provider-avatar">👤</div>
+            <div className="provider-info">
+              <div className="provider-name">Nurse Sample</div>
+              <div className="provider-specialty">RN</div>
+            </div>
+            <div className="provider-actions">
+              <span className="action-icon">📅</span>
+              <span className="action-icon">✉️</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Patient Dashboard Content
+  const renderPatientDashboard = () => (
+    <div className="dashboard-content">
+      {/* To Do Widget */}
+      <div className="widget todo-widget">
+        <div className="widget-header">
+          <span className="widget-icon">📝</span>
+          <h3 className="widget-title">To Do</h3>
+        </div>
+        <div className="widget-content">
+          <div className="todo-item">
+            <div className="todo-bar"></div>
+          </div>
+          <div className="todo-item">
+            <div className="todo-bar"></div>
+          </div>
+          <div className="todo-item">
+            <div className="todo-bar"></div>
+          </div>
+        </div>
+      </div>
+
+      {/* Care Team Widget */}
+      <div className="widget care-team-widget">
+        <div className="widget-header">
+          <span className="widget-icon">👥</span>
+          <h3 className="widget-title">Your Care Team & Providers</h3>
+        </div>
+        <div className="widget-content">
+          <div className="provider-item">
+            <div className="provider-avatar">👤</div>
+            <div className="provider-info">
+              <div className="provider-name">Name</div>
+              <div className="provider-specialty">Specialty</div>
+            </div>
+            <div className="provider-actions">
+              <span className="action-icon">✉️</span>
+              <span className="action-icon">📅</span>
+              <span className="action-icon">📊</span>
+            </div>
+          </div>
+          <div className="provider-item">
+            <div className="provider-avatar">👤</div>
+            <div className="provider-info">
+              <div className="provider-name">Name</div>
+              <div className="provider-specialty">Specialty</div>
+            </div>
+            <div className="provider-actions">
+              <span className="action-icon">✉️</span>
+              <span className="action-icon">📅</span>
+              <span className="action-icon">📊</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Appointments Widget */}
+      <PatientAppointmentsWidget patientId="patient-123" />
+
+      {/* Medical Records Widget */}
+      <div className="widget medical-records-widget">
+        <div className="widget-header">
+          <span className="widget-icon">📊</span>
+          <h3 className="widget-title">Medical Records</h3>
+        </div>
+        <div className="widget-content">
+          <div className="health-summary">
+            <h4>Health Summary</h4>
+            <div className="record-item">
+              <div className="record-info">
+                <span className="record-name">Anemia</span>
+                <span className="record-date">As of 01/10/2010</span>
+              </div>
+              <div className="record-actions">
+                <span className="info-icon">ℹ️</span>
+                <span className="delete-icon">✕</span>
+              </div>
+            </div>
+            <div className="record-item">
+              <div className="record-info">
+                <span className="record-name">Lipid Panel - Normal</span>
+                <span className="record-date">As of 02/12/2025</span>
+              </div>
+              <div className="record-actions">
+                <span className="info-icon">ℹ️</span>
+              </div>
+            </div>
+            <div className="record-item">
+              <div className="record-info">
+                <span className="record-name">Glucose - Normal</span>
+                <span className="record-date">As of 02/12/2025</span>
+              </div>
+              <div className="record-actions">
+                <span className="info-icon">ℹ️</span>
+              </div>
+            </div>
+            <div className="record-item">
+              <div className="record-info">
+                <span className="record-name">Thyroid - Normal</span>
+                <span className="record-date">As of 02/12/2025</span>
+              </div>
+              <div className="record-actions">
+                <span className="info-icon">ℹ️</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Decide which dashboard to render
+  const renderDashboard = () => {
+    if (isAdmin) return renderAdminDashboard();
+    if (isProvider) return renderDoctorDashboard();
+    return renderPatientDashboard();
+  };
+
   return (
     <div className="dashboard-container">
       {/* Sidebar Component */}
-      <Sidebar 
-        isCollapsed={sidebarCollapsed} 
-        onToggle={toggleSidebar} 
+      <Sidebar
+        isCollapsed={sidebarCollapsed}
+        onToggle={toggleSidebar}
       />
 
       {/* Main Content Area */}
@@ -32,7 +473,10 @@ const Home: React.FC = () => {
         {/* Top Header */}
         <header className="header">
           <div className="header-left">
-            <h1 className="brand-title">MediConnect</h1>
+            <h1 className="brand-title">
+              MediConnect
+              {isAdmin ? ' – Admin' : isProvider ? ' – Provider' : ''}
+            </h1>
           </div>
           <div className="header-center">
             <div className="search-bar">
@@ -44,6 +488,7 @@ const Home: React.FC = () => {
             {isAuthenticated ? (
               <div className="user-menu">
                 <span className="user-name">{user?.name || user?.email}</span>
+                <span className="user-role">({user?.role})</span>
                 <button className="logout-btn" onClick={handleLogout}>
                   Logout
                 </button>
@@ -56,141 +501,11 @@ const Home: React.FC = () => {
           </div>
         </header>
 
-        {/* Dashboard Content */}
-        <div className="dashboard-content">
-          {/* Admin Quick Access Widget */}
-          {isAuthenticated && user && (user.role === 'admin' || user.role === 'clinic_admin') && (
-            <div className="widget admin-widget">
-              <div className="widget-header">
-                <span className="widget-icon">🏥</span>
-                <h3 className="widget-title">Clinic Operations</h3>
-              </div>
-              <div className="widget-content">
-                <p>
-                  Manage clinic operations, check-ins, walk-ins, and waitlists
-                </p>
-                <button
-                  className="admin-widget-btn"
-                  onClick={() => navigate('/clinic-operations')}
-                >
-                  <span>🏥</span>
-                  <span>Open Clinic Dashboard</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* To Do Widget */}
-          <div className="widget todo-widget">
-            <div className="widget-header">
-              <span className="widget-icon">📝</span>
-              <h3 className="widget-title">To Do</h3>
-            </div>
-            <div className="widget-content">
-              <div className="todo-item">
-                <div className="todo-bar"></div>
-              </div>
-              <div className="todo-item">
-                <div className="todo-bar"></div>
-              </div>
-              <div className="todo-item">
-                <div className="todo-bar"></div>
-              </div>
-            </div>
-          </div>
-
-          {/* Care Team Widget */}
-          <div className="widget care-team-widget">
-            <div className="widget-header">
-              <span className="widget-icon">👥</span>
-              <h3 className="widget-title">Your Care Team & Providers</h3>
-            </div>
-            <div className="widget-content">
-              <div className="provider-item">
-                <div className="provider-avatar">👤</div>
-                <div className="provider-info">
-                  <div className="provider-name">Name</div>
-                  <div className="provider-specialty">Specialty</div>
-                </div>
-                <div className="provider-actions">
-                  <span className="action-icon">✉️</span>
-                  <span className="action-icon">📅</span>
-                  <span className="action-icon">📊</span>
-                </div>
-              </div>
-              <div className="provider-item">
-                <div className="provider-avatar">👤</div>
-                <div className="provider-info">
-                  <div className="provider-name">Name</div>
-                  <div className="provider-specialty">Specialty</div>
-                </div>
-                <div className="provider-actions">
-                  <span className="action-icon">✉️</span>
-                  <span className="action-icon">📅</span>
-                  <span className="action-icon">📊</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Appointments Widget */}
-          
-          <PatientAppointmentsWidget patientId="patient-123" />
-           
-          {/* Medical Records Widget */}
-          <div className="widget medical-records-widget">
-            <div className="widget-header">
-              <span className="widget-icon">📊</span>
-              <h3 className="widget-title">Medical Records</h3>
-            </div>
-            <div className="widget-content">
-              <div className="health-summary">
-                <h4>Health Summary</h4>
-                <div className="record-item">
-                  <div className="record-info">
-                    <span className="record-name">Anemia</span>
-                    <span className="record-date">As of 01/10/2010</span>
-                  </div>
-                  <div className="record-actions">
-                    <span className="info-icon">ℹ️</span>
-                    <span className="delete-icon">✕</span>
-                  </div>
-                </div>
-                <div className="record-item">
-                  <div className="record-info">
-                    <span className="record-name">Lipid Panel - Normal</span>
-                    <span className="record-date">As of 02/12/2025</span>
-                  </div>
-                  <div className="record-actions">
-                    <span className="info-icon">ℹ️</span>
-                  </div>
-                </div>
-                <div className="record-item">
-                  <div className="record-info">
-                    <span className="record-name">Glucose - Normal</span>
-                    <span className="record-date">As of 02/12/2025</span>
-                  </div>
-                  <div className="record-actions">
-                    <span className="info-icon">ℹ️</span>
-                  </div>
-                </div>
-                <div className="record-item">
-                  <div className="record-info">
-                    <span className="record-name">Thyroid - Normal</span>
-                    <span className="record-date">As of 02/12/2025</span>
-                  </div>
-                  <div className="record-actions">
-                    <span className="info-icon">ℹ️</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Dashboard Content - Role-based rendering */}
+        {renderDashboard()}
       </div>
     </div>
   );
 };
 
 export default Home;
-

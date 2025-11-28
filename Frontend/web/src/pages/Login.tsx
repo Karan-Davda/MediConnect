@@ -62,7 +62,17 @@ const Login: React.FC = () => {
         localStorage.removeItem('rememberMe');
       }
 
-      navigate('/home');
+      // Check if user was redirected from booking page
+      const returnPath = localStorage.getItem('returnPath');
+      
+      if (returnPath) {
+        // Clear the return path and navigate back
+        localStorage.removeItem('returnPath');
+        navigate(returnPath);
+      } else {
+        // Default redirect to home page
+        navigate('/home');
+      }
     } catch (error: any) {
       setErrors({ password: error.message || 'Login failed' });
     } finally {
