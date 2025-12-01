@@ -8,6 +8,8 @@ const medicalRecordsRoutes = require('./src/routes/medical-records');
 const prescriptionRoutes = require('./src/routes/prescriptions');
 const insuranceRoutes = require('./src/routes/insurance');
 const claimsRoutes = require('./src/routes/claims');
+const appointmentsRoutes = require('./src/routes/appointments');
+const reminderScheduler = require('./src/services/reminderScheduler');
 const { authenticate } = require('./src/middleware/auth');
 
 dotenv.config();
@@ -84,6 +86,7 @@ app.use('/api/medical-records', medicalRecordsRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/insurance', insuranceRoutes);
 app.use('/api/claims', claimsRoutes);
+app.use('/api/appointments', appointmentsRoutes);
 
 app.get('/api/protected', authenticate, (req, res) => {
   res.json({
@@ -108,6 +111,9 @@ app.listen(PORT, () => {
   console.log(`🚀 MediConnect Backend Server running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔐 API endpoints available under /api`);
+
+  reminderScheduler.start();
+  console.log('📅 Appointment reminder scheduler started');
 });
 
 module.exports = app;
