@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
+import { apiUrl } from "../config/api";
 import "../pages/Account.css";
 
 // --- Types ---
@@ -250,39 +251,79 @@ const BookAppointment: React.FC = () => {
     setSuccessMsg(null);
 
     try {
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+
       if (mode === "cancel") {
+        if (!mockExistingAppt) {
+          setErrorMsg("No appointment to cancel");
+          return;
+        }
+
+        const response = await fetch(`${apiUrl}/appointments/${mockExistingAppt.id}/status`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ status: 'cancelled' })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to cancel appointment');
+        }
+
         auditLog("CANCEL_APPOINTMENT", {
           apptId: mockExistingAppt?.id,
           providerId: mockExistingAppt?.providerId,
         });
 
         setSuccessMsg(
-          "Your appointment has been canceled. The provider has been notified and the slot is now available to other patients."
+          "Appointment cancelled! Notification sent via SMS and email."
         );
       } else {
         const payload = {
           patientId: user?.id,
+          patientName: user?.name,
+          patientEmail: user?.email,
+          patientPhone: "+1234567890",
           providerId: selectedProviderId,
-          date,
-          time,
+          providerName: provider?.name,
+          appointmentDate: date,
+          appointmentTime: time,
+          duration: 30,
           reason,
+          type: "In-Person",
+          location: visitLocation,
           fee: visitFee,
-          mode,
         };
 
-        // CC: backend will lock slot to whoever confirms first
-        // CN / ExHL: if backend down, we catch in catch block
+        const response = await fetch(`${apiUrl}/appointments`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to create appointment');
+        }
+
+        const appointmentData = await response.json();
+
         auditLog(
           mode === "book"
             ? "BOOK_APPOINTMENT"
             : "RESCHEDULE_APPOINTMENT",
-          payload
+          appointmentData
         );
 
         setSuccessMsg(
           mode === "book"
-            ? "Your appointment request was submitted. You'll receive a confirmation and reminders."
-            : "Your reschedule request was submitted. You'll receive an updated confirmation and reminders."
+            ? "Appointment confirmed! Notification sent via SMS and email."
+            : "Appointment rescheduled! Notification sent via SMS and email."
         );
       }
 
@@ -291,7 +332,7 @@ const BookAppointment: React.FC = () => {
     } catch (err: any) {
       console.error("Appointment action failed:", err);
       setErrorMsg(
-        "We couldn't reach the server. Please check your connection and try again."
+        err.message || "We couldn't reach the server. Please check your connection and try again."
       );
       setSuccessMsg(null);
     } finally {

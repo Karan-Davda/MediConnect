@@ -11,6 +11,12 @@ class User {
     twoFactorEnabled = false,
     lastLogin,
     isActive = true,
+    notificationPreferences = {
+      emailNotifications: true,
+      smsNotifications: true,
+      appointmentReminders: true,
+      reminderTimingHours: 24
+    },
     createdAt,
     updatedAt
   }) {
@@ -24,6 +30,7 @@ class User {
     this.twoFactorEnabled = twoFactorEnabled;
     this.lastLogin = lastLogin;
     this.isActive = isActive;
+    this.notificationPreferences = notificationPreferences;
     this.createdAt = createdAt || new Date();
     this.updatedAt = updatedAt || new Date();
   }
