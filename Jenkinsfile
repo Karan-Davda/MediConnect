@@ -1,8 +1,6 @@
 // Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev/QA
 
 @Library('mediconnectLib') _
-import mcSlack
-import mcDeploy
 
 pipeline {
   agent any
@@ -189,7 +187,7 @@ fi
       }
       steps {
         script {
-          mcDeploy.deployFrontendAndBackend()
+          mcDeploy(this)
         }
       }
     }
@@ -200,7 +198,7 @@ fi
       echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed to ${env.TARGET_ENV}"
       script {
         try {
-          mcSlack.notifySuccess(commitSubject: env.GIT_COMMIT_SUBJECT)
+          mcSlack.notifySuccess([commitSubject: env.GIT_COMMIT_SUBJECT])
         } catch (e) {
           echo "Slack not configured: ${e.message}"
         }
@@ -210,7 +208,7 @@ fi
       echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed (env=${env.TARGET_ENV})"
       script {
         try {
-          mcSlack.notifyFailure(commitSubject: env.GIT_COMMIT_SUBJECT)
+          mcSlack.notifyFailure([commitSubject: env.GIT_COMMIT_SUBJECT])
         } catch (e) {
           echo "Slack not configured: ${e.message}"
         }
