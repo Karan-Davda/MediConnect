@@ -185,6 +185,7 @@ body, html {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   width: 100%;
   box-sizing: border-box;
+  gap: 1rem; /* Add gap for better spacing */
 }
 
 .header-left .brand-title {
@@ -192,6 +193,7 @@ body, html {
   font-weight: bold;
   color: #2d3748;
   margin: 0;
+  white-space: nowrap; /* Prevent title from wrapping */
 }
 
 .header-center {
@@ -199,6 +201,7 @@ body, html {
   display: flex;
   justify-content: center;
   min-width: 0; /* Allow flex item to shrink below content size */
+  max-width: 600px; /* Limit maximum width */
 }
 
 .search-bar {
@@ -208,13 +211,17 @@ body, html {
   border-radius: 8px;
   padding: 0.75rem 1.25rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  min-width: 600px;
+  width: 100%; /* Use full available width instead of fixed min-width */
+  max-width: 600px; /* Set maximum width */
+  min-width: 200px; /* Set reasonable minimum width */
   height: 50px;
+  box-sizing: border-box;
 }
 
 .search-icon {
   margin-right: 0.5rem;
   color: #718096;
+  flex-shrink: 0; /* Prevent icon from shrinking */
 }
 
 .search-input {
@@ -223,6 +230,7 @@ body, html {
   flex: 1;
   font-size: 1.1rem;
   padding: 0.25rem 0;
+  min-width: 0; /* Allow input to shrink properly */
 }
 
 .search-input::placeholder {
@@ -241,57 +249,11 @@ body, html {
   flex-shrink: 0;
 }
 
-.user-menu {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.user-name {
-  color: #2d3748;
-  font-weight: 500;
-  font-size: 0.95rem;
-}
-
-.logout-btn {
-  background-color: #e53e3e;
-  color: white;
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  border: none;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.3s;
-  font-size: 1rem;
-}
-
-.logout-btn:hover {
-  background-color: #c53030;
-}
-
-.login-btn {
-  background-color: #667eea;
-  color: white;
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  text-decoration: none;
-  font-weight: 600;
-  transition: background-color 0.3s;
-  border: none;
-  font-size: 1rem;
-  display: inline-block;
-  line-height: 1.5;
-}
-
 /* User Role Display */
 .user-role {
   color: white;
   font-size: 0.85rem;
   font-style: italic;
-}
-
-.login-btn:hover {
-  background-color: #5a67d8;
 }
 
 /* Dashboard Content */
@@ -655,17 +617,24 @@ body, html {
   
   .header {
     padding: 1rem;
-    flex-direction: column;
-    gap: 1rem;
+    flex-wrap: wrap; /* Allow wrapping on smaller screens */
+    gap: 0.5rem;
   }
   
   .header-center {
     order: 1;
+    width: 100%; /* Take full width when wrapped */
+    margin-top: 0.5rem;
   }
   
   .search-bar {
-    min-width: 400px;
+    min-width: 250px; /* Smaller minimum width */
+    max-width: 100%; /* Allow full width */
     height: 45px;
+  }
+  
+  .header-left .brand-title {
+    font-size: 1.3rem; /* Slightly smaller on tablets */
   }
   
   .dashboard-content {
@@ -693,9 +662,48 @@ body, html {
     width: 100vw !important;
   }
   
+  .header {
+    flex-direction: column; /* Stack elements vertically */
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+  }
+  
+  .header-left {
+    text-align: center;
+  }
+  
+  .header-left .brand-title {
+    font-size: 1.25rem;
+  }
+  
+  .header-center {
+    order: 2;
+    width: 100%;
+    margin: 0;
+  }
+  
   .search-bar {
-    min-width: 300px;
+    min-width: 200px; /* Even smaller minimum for mobile */
+    width: 100%;
     height: 40px;
+    padding: 0.5rem 1rem;
+  }
+  
+  .search-input {
+    font-size: 1rem; /* Slightly smaller font on mobile */
+  }
+  
+  .header-right {
+    order: 3;
+    justify-content: center;
+    margin: 0;
+  }
+  
+  .user-menu {
+    flex-direction: column;
+    text-align: center;
+    gap: 0.5rem;
   }
   
   .calendar-dates span {
@@ -711,7 +719,6 @@ body, html {
     width: 100%;
     justify-content: center;
   }
-   
 }
 
 /* --- Appointment Calendar Color Coding --- */
@@ -829,7 +836,6 @@ body, html {
   margin-top: 0.5rem;
 }
 
-/* Provider Calendar Additional Styles */
 .calendar-dates span.has-open {
   border: 2px solid #48bb78;
   border-radius: 8px;
@@ -841,3 +847,48 @@ body, html {
   border-radius: 8px;
   font-weight: 600;
 }
+
+/* optional extras in Home.css */
+.message-preview-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.message-preview-item:last-child {
+  border-bottom: none;
+}
+
+.message-preview-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #2d3748;
+}
+
+.message-preview-snippet {
+  font-size: 0.8rem;
+  color: #718096;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-preview-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 0.75rem;
+  color: #a0aec0;
+}
+
+.message-unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #3182ce;
+  margin-top: 4px;
+}
+
