@@ -16,6 +16,8 @@ import ProcessPayments from './pages/ProcessPayments'
 import Billing from './pages/Billing'
 import BillingReportsPage from "./pages/BillingReportsPage";
 import BillingAuditLogPage from "./pages/BillingAuditLogPage";
+import Messages from "./pages/Message";
+import Claims from './pages/Claims'
 import './App.css'
 
 function App() {
@@ -39,6 +41,8 @@ function App() {
       <Route path="/billing" element={<Billing />} />
       <Route path="/billing/reports" element={<BillingReportsPage />} />
       <Route path="/audit-log/billing" element={<BillingAuditLogPage />} />
+      <Route path="/messages" element={<Messages />} />
+      <Route path="/claims" element={<Claims />} />
     </Routes>
   )
 }
