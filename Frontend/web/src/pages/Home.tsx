@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
 import PatientAppointmentsWidget from "../widgets/PatientAppointmentsWidget";
 import { useCalendar } from "../calendar/useCalendar";
+import NotificationIcon from '../components/NotificationIcon';
 import './Home.css';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -17,6 +18,15 @@ const Home: React.FC = () => {
   const [slot, setSlot] = useState("09:00");
   const { isAuthenticated, user, logout, hasRole } = useAuth();
   const navigate = useNavigate();
+
+  // Redirect to onboarding if profile is incomplete (for providers)
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      if ((user.role === 'doctor' || user.role === 'clinic_admin') && user.profileComplete === false) {
+        navigate('/onboarding');
+      }
+    }
+  }, [isAuthenticated, user, navigate]);
 
   const toggleSidebar = () => {
     setSidebarCollapsed(!sidebarCollapsed);
@@ -82,7 +92,7 @@ const Home: React.FC = () => {
     const providerId = providers[0]?.provider?.id ?? "p1";
     const provider = providers.find((p) => p.provider.id === providerId) ?? providers[0];
 
-    return (
+  return (
       <div className="dashboard-content">
         <div className="widget">
           <div className="widget-header">
@@ -232,7 +242,7 @@ const Home: React.FC = () => {
 
   // Admin Dashboard Content (admin / clinic_admin)
   const renderAdminDashboard = () => (
-    <div className="dashboard-content">
+        <div className="dashboard-content">
       {/* Clinic Snapshot */}
       <div className="widget admin-widget">
         <div className="widget-header">
@@ -264,11 +274,11 @@ const Home: React.FC = () => {
       </div>
 
       {/* Operations & Queues */}
-      <div className="widget admin-widget">
-        <div className="widget-header">
-          <span className="widget-icon">🏥</span>
-          <h3 className="widget-title">Clinic Operations</h3>
-        </div>
+            <div className="widget admin-widget">
+              <div className="widget-header">
+                <span className="widget-icon">🏥</span>
+                <h3 className="widget-title">Clinic Operations</h3>
+              </div>
         <div className="widget-content admin-ops-grid">
           <div className="admin-ops-column">
             <h4>Check-In / Waitlist</h4>
@@ -280,10 +290,10 @@ const Home: React.FC = () => {
           </div>
           <div className="admin-ops-column">
             <h4>Operational Actions</h4>
-            <button
-              className="admin-widget-btn"
-              onClick={() => navigate('/clinic-operations')}
-            >
+                <button
+                  className="admin-widget-btn"
+                  onClick={() => navigate('/clinic-operations')}
+                >
               🏥 Open Clinic Operations Dashboard
             </button>
             <button
@@ -303,8 +313,8 @@ const Home: React.FC = () => {
               onClick={() => navigate('/reports')}
             >
               📑 Reports & Audit Logs
-            </button>
-          </div>
+                </button>
+              </div>
         </div>
       </div>
 
@@ -345,112 +355,112 @@ const Home: React.FC = () => {
   // Patient Dashboard Content
   const renderPatientDashboard = () => (
     <div className="dashboard-content">
-      {/* To Do Widget */}
-      <div className="widget todo-widget">
-        <div className="widget-header">
-          <span className="widget-icon">📝</span>
-          <h3 className="widget-title">To Do</h3>
-        </div>
-        <div className="widget-content">
-          <div className="todo-item">
-            <div className="todo-bar"></div>
+          {/* To Do Widget */}
+          <div className="widget todo-widget">
+            <div className="widget-header">
+              <span className="widget-icon">📝</span>
+              <h3 className="widget-title">To Do</h3>
+            </div>
+            <div className="widget-content">
+              <div className="todo-item">
+                <div className="todo-bar"></div>
+              </div>
+              <div className="todo-item">
+                <div className="todo-bar"></div>
+              </div>
+              <div className="todo-item">
+                <div className="todo-bar"></div>
+              </div>
+            </div>
           </div>
-          <div className="todo-item">
-            <div className="todo-bar"></div>
-          </div>
-          <div className="todo-item">
-            <div className="todo-bar"></div>
-          </div>
-        </div>
-      </div>
 
-      {/* Care Team Widget */}
-      <div className="widget care-team-widget">
-        <div className="widget-header">
-          <span className="widget-icon">👥</span>
-          <h3 className="widget-title">Your Care Team & Providers</h3>
-        </div>
-        <div className="widget-content">
-          <div className="provider-item">
-            <div className="provider-avatar">👤</div>
-            <div className="provider-info">
-              <div className="provider-name">Name</div>
-              <div className="provider-specialty">Specialty</div>
+          {/* Care Team Widget */}
+          <div className="widget care-team-widget">
+            <div className="widget-header">
+              <span className="widget-icon">👥</span>
+              <h3 className="widget-title">Your Care Team & Providers</h3>
             </div>
-            <div className="provider-actions">
-              <span className="action-icon">✉️</span>
-              <span className="action-icon">📅</span>
-              <span className="action-icon">📊</span>
+            <div className="widget-content">
+              <div className="provider-item">
+                <div className="provider-avatar">👤</div>
+                <div className="provider-info">
+                  <div className="provider-name">Name</div>
+                  <div className="provider-specialty">Specialty</div>
+                </div>
+                <div className="provider-actions">
+                  <span className="action-icon">✉️</span>
+                  <span className="action-icon">📅</span>
+                  <span className="action-icon">📊</span>
+                </div>
+              </div>
+              <div className="provider-item">
+                <div className="provider-avatar">👤</div>
+                <div className="provider-info">
+                  <div className="provider-name">Name</div>
+                  <div className="provider-specialty">Specialty</div>
+                </div>
+                <div className="provider-actions">
+                  <span className="action-icon">✉️</span>
+                  <span className="action-icon">📅</span>
+                  <span className="action-icon">📊</span>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="provider-item">
-            <div className="provider-avatar">👤</div>
-            <div className="provider-info">
-              <div className="provider-name">Name</div>
-              <div className="provider-specialty">Specialty</div>
-            </div>
-            <div className="provider-actions">
-              <span className="action-icon">✉️</span>
-              <span className="action-icon">📅</span>
-              <span className="action-icon">📊</span>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Appointments Widget */}
-      <PatientAppointmentsWidget patientId="patient-123" />
-
-      {/* Medical Records Widget */}
-      <div className="widget medical-records-widget">
-        <div className="widget-header">
-          <span className="widget-icon">📊</span>
-          <h3 className="widget-title">Medical Records</h3>
-        </div>
-        <div className="widget-content">
-          <div className="health-summary">
-            <h4>Health Summary</h4>
-            <div className="record-item">
-              <div className="record-info">
-                <span className="record-name">Anemia</span>
-                <span className="record-date">As of 01/10/2010</span>
-              </div>
-              <div className="record-actions">
-                <span className="info-icon">ℹ️</span>
-                <span className="delete-icon">✕</span>
-              </div>
+          {/* Appointments Widget */}
+          <PatientAppointmentsWidget patientId="patient-123" />
+           
+          {/* Medical Records Widget */}
+          <div className="widget medical-records-widget">
+            <div className="widget-header">
+              <span className="widget-icon">📊</span>
+              <h3 className="widget-title">Medical Records</h3>
             </div>
-            <div className="record-item">
-              <div className="record-info">
-                <span className="record-name">Lipid Panel - Normal</span>
-                <span className="record-date">As of 02/12/2025</span>
-              </div>
-              <div className="record-actions">
-                <span className="info-icon">ℹ️</span>
-              </div>
-            </div>
-            <div className="record-item">
-              <div className="record-info">
-                <span className="record-name">Glucose - Normal</span>
-                <span className="record-date">As of 02/12/2025</span>
-              </div>
-              <div className="record-actions">
-                <span className="info-icon">ℹ️</span>
-              </div>
-            </div>
-            <div className="record-item">
-              <div className="record-info">
-                <span className="record-name">Thyroid - Normal</span>
-                <span className="record-date">As of 02/12/2025</span>
-              </div>
-              <div className="record-actions">
-                <span className="info-icon">ℹ️</span>
+            <div className="widget-content">
+              <div className="health-summary">
+                <h4>Health Summary</h4>
+                <div className="record-item">
+                  <div className="record-info">
+                    <span className="record-name">Anemia</span>
+                    <span className="record-date">As of 01/10/2010</span>
+                  </div>
+                  <div className="record-actions">
+                    <span className="info-icon">ℹ️</span>
+                    <span className="delete-icon">✕</span>
+                  </div>
+                </div>
+                <div className="record-item">
+                  <div className="record-info">
+                    <span className="record-name">Lipid Panel - Normal</span>
+                    <span className="record-date">As of 02/12/2025</span>
+                  </div>
+                  <div className="record-actions">
+                    <span className="info-icon">ℹ️</span>
+                  </div>
+                </div>
+                <div className="record-item">
+                  <div className="record-info">
+                    <span className="record-name">Glucose - Normal</span>
+                    <span className="record-date">As of 02/12/2025</span>
+                  </div>
+                  <div className="record-actions">
+                    <span className="info-icon">ℹ️</span>
+                  </div>
+                </div>
+                <div className="record-item">
+                  <div className="record-info">
+                    <span className="record-name">Thyroid - Normal</span>
+                    <span className="record-date">As of 02/12/2025</span>
+                  </div>
+                  <div className="record-actions">
+                    <span className="info-icon">ℹ️</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
   );
 
   // Decide which dashboard to render
@@ -487,6 +497,7 @@ const Home: React.FC = () => {
           <div className="header-right">
             {isAuthenticated ? (
               <div className="user-menu">
+                <NotificationIcon />
                 <span className="user-name">{user?.name || user?.email}</span>
                 <span className="user-role">({user?.role})</span>
                 <button className="logout-btn" onClick={handleLogout}>

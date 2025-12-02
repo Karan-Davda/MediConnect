@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import './Login.css';
 
@@ -12,6 +12,7 @@ interface LoginFormData {
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
   const [formData, setFormData] = useState<LoginFormData>({
     email: '',
@@ -21,6 +22,9 @@ const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [loading, setLoading] = useState(false);
+  
+  // Get the path the user was trying to access before being redirected to login
+  const from = (location.state as any)?.from?.pathname || null;
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -62,16 +66,26 @@ const Login: React.FC = () => {
         localStorage.removeItem('rememberMe');
       }
 
-      // Check if user was redirected from booking page
+      // Check if user was redirected from a protected route
       const returnPath = localStorage.getItem('returnPath');
       
-      if (returnPath) {
-        // Clear the return path and navigate back
+      // Priority 1: Redirect to the page they were trying to access (from ProtectedRoute)
+      if (from) {
+        navigate(from, { replace: true });
+      } 
+      // Priority 2: Redirect to stored return path (from booking page, etc.)
+      else if (returnPath) {
         localStorage.removeItem('returnPath');
-        navigate(returnPath);
-      } else {
-        // Default redirect to home page
-        navigate('/home');
+        navigate(returnPath, { replace: true });
+      } 
+      // Priority 3: Check if profile needs to be completed (for providers)
+      else {
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        if ((userData.role === 'doctor' || userData.role === 'clinic_admin') && !userData.profileComplete) {
+          navigate('/onboarding', { replace: true });
+        } else {
+          navigate('/home', { replace: true });
+        }
       }
     } catch (error: any) {
       setErrors({ password: error.message || 'Login failed' });

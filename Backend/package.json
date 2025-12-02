@@ -18,6 +18,8 @@
     "express-session": "^1.18.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "pg": "^8.16.3",
+    "resend": "^3.5.0"
   }
 }

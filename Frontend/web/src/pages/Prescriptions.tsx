@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/Sidebar';
+import NotificationIcon from '../components/NotificationIcon';
 import { apiUrl } from '../config/api';
 import './Prescriptions.css';
 
@@ -487,6 +488,7 @@ const Prescriptions: React.FC = () => {
           </div>
           <div className="header-right">
             <div className="user-menu">
+              <NotificationIcon />
               <span className="user-name">{user?.name}</span>
               <button onClick={logout} className="logout-btn">Logout</button>
             </div>

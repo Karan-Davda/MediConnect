@@ -21,7 +21,9 @@ interface AuditLog {
 }
 
 const AccessControlDashboard: React.FC = () => {
-  // Demo users for testing
+  console.log('AccessControlDashboard: Component rendering');
+  
+  // Demo users for testing (fallback)
   const demoUsers: User[] = [
     { id: '1', email: 'patient@example.com', name: 'John Patient', role: 'patient', isActive: true },
     { id: '2', email: 'doctor@example.com', name: 'Dr. Jane Smith', role: 'doctor', isActive: true },
@@ -31,9 +33,10 @@ const AccessControlDashboard: React.FC = () => {
     { id: '6', email: 'cs@example.com', name: 'Tom Customer Success', role: 'customer_success', isActive: true }
   ];
 
-  const [users, setUsers] = useState<User[]>(demoUsers);
+  const [users, setUsers] = useState<User[]>(demoUsers); // Start with demo users so something shows
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // Start with false so we show content immediately
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'users' | 'audit'>('users');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -47,23 +50,54 @@ const AccessControlDashboard: React.FC = () => {
   });
 
   useEffect(() => {
+    console.log('AccessControlDashboard: useEffect running');
     const token = localStorage.getItem('token');
+    const userStr = localStorage.getItem('user');
+    let user = null;
+    try {
+      user = userStr ? JSON.parse(userStr) : null;
+    } catch (e) {
+      console.error('Failed to parse user from localStorage:', e);
+    }
+    
+    console.log('AccessControlDashboard: User role:', user?.role);
+    
+    // Check if user has required role
+    const allowedRoles = ['clinic_admin', 'account_manager', 'customer_success'];
+    if (user && !allowedRoles.includes(user.role)) {
+      console.warn('AccessControlDashboard: User role not authorized:', user.role);
+      setError(`Access Denied: Your role (${user.role}) does not have permission to access this page. Required roles: ${allowedRoles.join(', ')}`);
+      setLoading(false);
+      return;
+    }
+    
     if (token) {
+      console.log('AccessControlDashboard: Token found, loading data');
+      setLoading(true);
       loadData();
     } else {
+      console.log('AccessControlDashboard: No token found');
+      setError('No authentication token found');
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadData = async () => {
     try {
+      setLoading(true);
+      setError(null);
+      
       const token = localStorage.getItem('token');
       if (!token) {
         console.log('No authentication token found');
+        setError('No authentication token found');
         setLoading(false);
         return;
       }
 
+      console.log('Loading access control data...');
+      
       const [usersRes, logsRes] = await Promise.all([
         fetch(apiUrl('access-control/users'), {
           headers: {
@@ -71,7 +105,7 @@ const AccessControlDashboard: React.FC = () => {
           }
         }).catch(err => {
           console.error('Failed to fetch users:', err);
-          return { ok: false, text: async () => 'Network error' };
+          return null;
         }),
         fetch(apiUrl('access-control/audit-logs'), {
           headers: {
@@ -79,27 +113,107 @@ const AccessControlDashboard: React.FC = () => {
           }
         }).catch(err => {
           console.error('Failed to fetch logs:', err);
-          return { ok: false };
+          return null;
         })
       ]);
 
-      if (usersRes.ok) {
-        const data = await usersRes.json();
-        setUsers(data.users || []);
-        console.log('Loaded users:', data.users);
+      if (usersRes && usersRes.ok) {
+        try {
+          const data = await usersRes.json();
+          console.log('Raw backend response:', data);
+          // Map backend response to frontend format
+          const mappedUsers = (data.users || []).map((u: any) => {
+            // Build name from first_name and last_name
+            const firstName = (u.first_name || '').trim();
+            const lastName = (u.last_name || '').trim();
+            let fullName = '';
+            if (firstName && lastName) {
+              fullName = `${firstName} ${lastName}`;
+            } else if (firstName) {
+              fullName = firstName;
+            } else if (lastName) {
+              fullName = lastName;
+            } else if (u.name) {
+              fullName = u.name;
+            } else {
+              // Use email as fallback if no name available
+              fullName = u.email ? u.email.split('@')[0] : 'User';
+            }
+            
+            return {
+              id: String(u.id || u.user_id),
+              email: u.email || '',
+              name: fullName,
+              role: u.role || u.role_name || '',
+              isActive: u.is_active !== undefined ? u.is_active : (u.isActive !== undefined ? u.isActive : true)
+            };
+          });
+          setUsers(mappedUsers);
+          console.log('Mapped users:', mappedUsers);
+        } catch (parseError) {
+          console.error('Failed to parse users response:', parseError);
+          setError('Failed to parse users data');
+        }
+      } else if (usersRes) {
+        try {
+          let errorData;
+          try {
+            errorData = await usersRes.json();
+          } catch (jsonError) {
+            const errorText = await usersRes.text();
+            errorData = { error: errorText };
+          }
+          console.error('Failed to load users:', usersRes.status, errorData);
+          if (usersRes.status === 403) {
+            setError('Access Denied: You do not have permission to access this page. Required role: clinic_admin, account_manager, or customer_success');
+          } else if (usersRes.status === 401) {
+            setError('Authentication failed. Please log in again.');
+          } else {
+            setError(`Failed to load users (${usersRes.status}): ${errorData.error || 'Unknown error'}`);
+          }
+        } catch (textError) {
+          console.error('Failed to load users:', usersRes.status, textError);
+          if (usersRes.status === 403) {
+            setError('Access Denied: You do not have permission to access this page.');
+          } else {
+            setError(`Failed to load users: ${usersRes.status}`);
+          }
+        }
       } else {
-        const errorText = await usersRes.text();
-        console.error('Failed to load users:', usersRes.status, errorText);
+        console.error('Failed to fetch users: Network error');
+        setError('Network error: Could not connect to server');
       }
 
-      if (logsRes.ok) {
-        const data = await logsRes.json();
-        setAuditLogs(data.logs || []);
+      if (logsRes && logsRes.ok) {
+        try {
+          const data = await logsRes.json();
+          setAuditLogs(data.logs || []);
+          console.log('Loaded audit logs:', data.logs);
+        } catch (parseError) {
+          console.error('Failed to parse logs response:', parseError);
+        }
+      } else if (logsRes) {
+        try {
+          let errorData;
+          try {
+            errorData = await logsRes.json();
+          } catch (jsonError) {
+            const errorText = await logsRes.text();
+            errorData = { error: errorText };
+          }
+          console.error('Failed to load logs:', logsRes.status, errorData);
+          if (logsRes.status === 403) {
+            setError(prev => prev ? prev + '\nAccess Denied: Cannot load audit logs. Required role: clinic_admin or account_manager' : 'Access Denied: Cannot load audit logs. Required role: clinic_admin or account_manager');
+          }
+        } catch (textError) {
+          console.error('Failed to load logs:', logsRes.status, textError);
+        }
       } else {
-        console.error('Failed to load logs');
+        console.error('Failed to fetch logs: Network error');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to load data:', error);
+      setError(error.message || 'Failed to load data. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -168,22 +282,97 @@ const AccessControlDashboard: React.FC = () => {
     }
   };
 
-  if (loading) {
+  // Always show content, even while loading (show demo data)
+  // if (loading) {
+  //   return (
+  //     <div style={{ padding: '2rem', textAlign: 'center', minHeight: '200px' }}>
+  //       <h2>Loading Access Control Dashboard...</h2>
+  //       <p>Please wait while we load the data.</p>
+  //     </div>
+  //   );
+  // }
+
+  // Show error as a banner, but still show the dashboard
+  // if (error) {
+  //   return (
+  //     <div style={{ padding: '2rem', textAlign: 'center', minHeight: '200px' }}>
+  //       <h2 style={{ color: '#e53e3e' }}>Error Loading Data</h2>
+  //       <p style={{ color: '#718096', marginBottom: '1rem' }}>{error}</p>
+  //       <button 
+  //         onClick={() => {
+  //           setError(null);
+  //           setLoading(true);
+  //           loadData();
+  //         }}
+  //         style={{ 
+  //           marginTop: '1rem', 
+  //           padding: '0.75rem 1.5rem',
+  //           backgroundColor: '#667eea',
+  //           color: 'white',
+  //           border: 'none',
+  //           borderRadius: '8px',
+  //           cursor: 'pointer',
+  //           fontSize: '1rem'
+  //         }}
+  //       >
+  //         Retry
+  //       </button>
+  //     </div>
+  //   );
+  // }
+
+  // Use demo users if no users loaded
+  const displayUsers = users.length > 0 ? users : demoUsers;
+
+  console.log('AccessControlDashboard: About to render, users:', displayUsers.length, 'loading:', loading, 'error:', error);
+
+  // Always render something - even if there's an error
+  try {
     return (
-      <div className="dashboard-container">
-        <div className="loading">Loading...</div>
-      </div>
-    );
-  }
-
-  // Show demo data if not authenticated (for testing purposes)
-
-  return (
-    <div className="access-control-dashboard-wrapper">
-      <div className="access-control-dashboard-card">
-        <div className="dashboard-header">
-          <h1>Access Control Dashboard</h1>
-          <p className="subtitle">Manage user access rights, permissions, and security settings</p>
+      <div style={{ minHeight: '400px', padding: '1rem', backgroundColor: '#f7fafc', width: '100%', display: 'block' }}>
+      {error && (
+        <div style={{ 
+          padding: '1.5rem', 
+          marginBottom: '1rem', 
+          backgroundColor: '#fed7d7', 
+          color: '#742a2a', 
+          borderRadius: '8px',
+          border: '2px solid #fc8181',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+            <strong style={{ fontSize: '1.1rem' }}>⚠️ Error</strong>
+            <button 
+              onClick={() => {
+                setError(null);
+                setLoading(true);
+                loadData();
+              }}
+              style={{ 
+                padding: '0.5rem 1rem',
+                backgroundColor: '#667eea',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.9rem'
+              }}
+            >
+              Retry
+            </button>
+          </div>
+          <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.95rem' }}>{error}</div>
+        </div>
+      )}
+      {loading && (
+        <div style={{ padding: '1rem', marginBottom: '1rem', textAlign: 'center', color: '#718096' }}>
+          Loading data from server...
+        </div>
+      )}
+      <div style={{ backgroundColor: '#fff', borderRadius: '8px', padding: '2rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', width: '100%', boxSizing: 'border-box' }}>
+        <div style={{ marginBottom: '2rem' }}>
+          <h1 style={{ margin: 0, fontSize: '2rem', color: '#2d3748', fontWeight: 'bold' }}>Access Control Dashboard</h1>
+          <p style={{ margin: '0.5rem 0 0 0', color: '#718096', fontSize: '1rem' }}>Manage user access rights, permissions, and security settings</p>
         </div>
 
         <div className="dashboard-tabs">
@@ -209,17 +398,17 @@ const AccessControlDashboard: React.FC = () => {
         {activeTab === 'users' && (
           <div className="users-section">
 
-            {users.length > 0 ? (
+            {displayUsers.length > 0 ? (
               <div className="users-grid">
-                {users.map((user) => (
+                {displayUsers.map((user) => (
                   <div key={user.id} className="user-card">
                     <div className="user-header">
                       <div className="user-avatar">
-                        {user.name.charAt(0).toUpperCase()}
+                        {(user.name && user.name.length > 0) ? user.name.charAt(0).toUpperCase() : '?'}
                       </div>
                       <div className="user-info">
-                        <h3>{user.name}</h3>
-                        <p className="user-email">{user.email}</p>
+                        <h3>{user.name || 'Unknown User'}</h3>
+                        <p className="user-email">{user.email || 'No email'}</p>
                       </div>
                     </div>
                     
@@ -413,7 +602,17 @@ const AccessControlDashboard: React.FC = () => {
         </div>
       )}
     </div>
-  );
+    );
+  } catch (renderError) {
+    console.error('AccessControlDashboard: Render error:', renderError);
+    return (
+      <div style={{ padding: '2rem', backgroundColor: '#fed7d7', color: '#742a2a', borderRadius: '8px' }}>
+        <h2>Error Rendering Dashboard</h2>
+        <p>{renderError instanceof Error ? renderError.message : 'Unknown error'}</p>
+        <pre style={{ fontSize: '12px', overflow: 'auto' }}>{renderError instanceof Error ? renderError.stack : String(renderError)}</pre>
+      </div>
+    );
+  }
 };
 
 export default AccessControlDashboard;

@@ -7,6 +7,7 @@ interface User {
   name: string;
   role: string;
   clinicId?: string;
+  profileComplete?: boolean;
 }
 
 interface AuthContextType {
@@ -16,6 +17,7 @@ interface AuthContextType {
   logout: () => void;
   isAuthenticated: boolean;
   hasRole: (roles: string[]) => boolean;
+  isLoading: boolean; // Add loading state
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -23,16 +25,67 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true); // Start with loading = true
 
   useEffect(() => {
-    // Check for stored token on mount
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-    
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
-    }
+    // Validate stored token on mount/refresh
+    const validateStoredToken = async () => {
+      const storedToken = localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
+      
+      // If no token stored, we're done loading immediately
+      if (!storedToken || !storedUser) {
+        setIsLoading(false);
+        return;
+      }
+      
+      try {
+        // Validate token with backend
+        const response = await fetch(apiUrl('auth/me'), {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${storedToken}`,
+          },
+        });
+
+        if (response.ok) {
+          // Token is valid, restore user session
+          const userData = await response.json();
+          // The /me endpoint returns user data wrapped in { user: {...} }
+          const user = userData.user || userData;
+          setToken(storedToken);
+          setUser(user);
+          // Update localStorage with fresh user data
+          localStorage.setItem('user', JSON.stringify(user));
+        } else {
+          // Token is invalid or expired, clear storage
+          console.log('Token validation failed, clearing session');
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setToken(null);
+          setUser(null);
+        }
+      } catch (error) {
+        // Network error or other issue, try to use stored data
+        console.warn('Token validation error, using stored data:', error);
+        try {
+          setToken(storedToken);
+          setUser(JSON.parse(storedUser));
+        } catch (parseError) {
+          // If stored user data is corrupted, clear it
+          console.error('Failed to parse stored user data:', parseError);
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setToken(null);
+          setUser(null);
+        }
+      } finally {
+        // Mark loading as complete
+        setIsLoading(false);
+      }
+    };
+
+    validateStoredToken();
   }, []);
 
   const login = async (email: string, password: string) => {
@@ -202,7 +255,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isAuthenticated, hasRole }}>
+    <AuthContext.Provider value={{ user, token, login, logout, isAuthenticated, hasRole, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

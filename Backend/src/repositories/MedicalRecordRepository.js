@@ -4,7 +4,9 @@ const { MedicalRecord, Diagnosis, Treatment, LabResult } = require('../models/Me
 const Patient = require('../models/Patient');
 
 // In-memory storage (will be replaced with database calls later)
-const patients = [];
+// Note: Patients are now loaded from database, but we keep in-memory storage
+// for syncing patients when creating medical records (for notifications)
+const patients = []; // Only used for syncing database patients to in-memory for notifications
 const medicalRecords = [];
 let patientIdCounter = 1;
 let recordIdCounter = 1;
@@ -171,8 +173,8 @@ function initializeSamplePatients() {
 }
 
 // Initialize sample data on module load
-// When database is ready, comment this out and load from database instead
-initializeSamplePatients();
+// DISABLED: Now using database patients only
+// initializeSamplePatients();
 
 // ============================================
 // PATIENT REPOSITORY METHODS

@@ -677,6 +677,9 @@ const Account: React.FC = () => {
                         <strong>SMS reminders:</strong>{" "}
                         {displayUser.notifications?.smsReminders ? "On" : "Off"}
                       </p>
+                      <p style={{ margin: "12px 0 6px 0", fontSize: "12px", color: "#666", fontStyle: "italic" }}>
+                        💡 Test result notifications will be sent based on these preferences.
+                      </p>
                     </>
                   ) : (
                     <div>

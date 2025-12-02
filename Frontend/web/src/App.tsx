@@ -16,29 +16,150 @@ import ProcessPayments from './pages/ProcessPayments'
 import Billing from './pages/Billing'
 import BillingReportsPage from "./pages/BillingReportsPage";
 import BillingAuditLogPage from "./pages/BillingAuditLogPage";
+import CompleteProfile from './pages/CompleteProfile'
+import ProtectedRoute from './components/ProtectedRoute'
 import './App.css'
 
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/home" element={<Home />} />
-      <Route path="/account" element={<Account />} />
+      {/* Public Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register/patient/step1" element={<PatientRegisterStep1 />} />
       <Route path="/register/patient/step2" element={<PatientRegisterStep2 />} />
       <Route path="/register/provider" element={<ProviderRegister />} />
-      <Route path="/book-appointment" element={<BookAppointment />} />
-      <Route path="/find-doctors" element={<FindDoctors />} />
-      <Route path="/access-control" element={<AccessControl />} />
-      <Route path="/clinic-operations" element={<ClinicOperations />} />
-      <Route path="/medical-records" element={<MedicalRecords />} />
-      <Route path="/prescriptions" element={<Prescriptions />} />
-      <Route path="/insurance" element={<Insurance />} />
-      <Route path="/process-payments" element={<ProcessPayments />} />
-      <Route path="/billing" element={<Billing />} />
-      <Route path="/billing/reports" element={<BillingReportsPage />} />
-      <Route path="/audit-log/billing" element={<BillingAuditLogPage />} />
+
+      {/* Protected Routes - Available to All Authenticated Users */}
+      <Route 
+        path="/" 
+        element={
+          <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/home" 
+        element={
+          <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/account" 
+        element={
+          <ProtectedRoute>
+            <Account />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/onboarding" 
+        element={
+          <ProtectedRoute requiredRole={['doctor', 'clinic_admin']}>
+            <CompleteProfile />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Patient-Only Routes */}
+      <Route 
+        path="/find-doctors" 
+        element={
+          <ProtectedRoute requiredRole="patient">
+            <FindDoctors />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/book-appointment" 
+        element={
+          <ProtectedRoute requiredRole="patient">
+            <BookAppointment />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/billing" 
+        element={
+          <ProtectedRoute requiredRole="patient">
+            <Billing />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Provider Routes (Doctors, Clinic Staff, Clinic Admins) */}
+      <Route 
+        path="/medical-records" 
+        element={
+          <ProtectedRoute requiredRole={['doctor', 'clinic_staff', 'clinic_admin']}>
+            <MedicalRecords />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/prescriptions" 
+        element={
+          <ProtectedRoute requiredRole={['doctor', 'clinic_staff', 'clinic_admin']}>
+            <Prescriptions />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Clinic Admin Routes */}
+      <Route 
+        path="/clinic-operations" 
+        element={
+          <ProtectedRoute requiredRole="clinic_admin">
+            <ClinicOperations />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Clinic Admin Routes */}
+      <Route 
+        path="/access-control" 
+        element={
+          <ProtectedRoute requiredRole="clinic_admin">
+            <AccessControl />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Shared Routes (Patients and Providers) */}
+      <Route 
+        path="/insurance" 
+        element={
+          <ProtectedRoute requiredRole={['patient', 'doctor', 'clinic_staff', 'clinic_admin']}>
+            <Insurance />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/process-payments" 
+        element={
+          <ProtectedRoute requiredRole={['patient', 'clinic_admin']}>
+            <ProcessPayments />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/billing/reports" 
+        element={
+          <ProtectedRoute requiredRole={['clinic_admin', 'clinic_staff']}>
+            <BillingReportsPage />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/audit-log/billing" 
+        element={
+          <ProtectedRoute requiredRole={['clinic_admin']}>
+            <BillingAuditLogPage />
+          </ProtectedRoute>
+        } 
+      />
     </Routes>
   )
 }

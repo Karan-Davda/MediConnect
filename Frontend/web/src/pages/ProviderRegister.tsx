@@ -244,10 +244,16 @@ const ProviderRegister: React.FC = () => {
       const data = await response.json();
       console.log('Registration successful:', data);
 
-      setSuccessMessage('Registration successful! Redirecting to login...');
+      // Store token and user for auto-login
+      if (data.token && data.user) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+      }
+
+      setSuccessMessage('Registration successful! Redirecting to complete your profile...');
 
       setTimeout(() => {
-        navigate('/login');
+        navigate('/onboarding');
       }, 2000);
     } catch (error: any) {
       console.error('Registration error:', error);

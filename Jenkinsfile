@@ -1,6 +1,11 @@
 // Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev/QA
 
+<<<<<<< HEAD
+@Library('mediconnectLib@main') _
+
+=======
 @Library('mediconnectLib') _
+>>>>>>> origin/Dev
 import mcSlack
 import mcDeploy
 
@@ -180,7 +185,7 @@ fi
       }
     }
 
-    stage('Deploy to AWS') {
+     stage('Deploy to AWS') {
       when {
         allOf {
           expression { return params.RUN_DEPLOY }
@@ -189,18 +194,36 @@ fi
       }
       steps {
         script {
+<<<<<<< HEAD
+          // call shared library global step
+          mcDeploy(this)
+=======
           mcDeploy.deployFrontendAndBackend()
+>>>>>>> origin/Dev
         }
       }
     }
   } // stages
 
-  post {
+      post {
     success {
       echo "✅ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} deployed to ${env.TARGET_ENV}"
       script {
         try {
+<<<<<<< HEAD
+          slackSend(
+            color: '#2EB67D',
+            message:
+              "*${env.GIT_COMMIT_SUBJECT}*\n" +
+              "✅ *Build Succeeded* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
+              (env.TARGET_ENV ? "Env: *${env.TARGET_ENV}*\n" : "") +
+              "Branch: *${env.BRANCH_NAME}*\n" +
+              "Commit: `${env.GIT_COMMIT_SHORT}`\n" +
+              "<${env.BUILD_URL}|View Console Output>"
+          )
+=======
           mcSlack.notifySuccess(commitSubject: env.GIT_COMMIT_SUBJECT)
+>>>>>>> origin/Dev
         } catch (e) {
           echo "Slack not configured: ${e.message}"
         }
@@ -210,7 +233,20 @@ fi
       echo "❌ ${env.BRANCH_NAME}@${env.GIT_COMMIT_SHORT} failed (env=${env.TARGET_ENV})"
       script {
         try {
+<<<<<<< HEAD
+          slackSend(
+            color: '#E01E5A',
+            message:
+              "*${env.GIT_COMMIT_SUBJECT ?: 'Build failed'}*\n" +
+              "❌ *Build Failed* — `${env.JOB_NAME}` #${env.BUILD_NUMBER}\n" +
+              (env.TARGET_ENV ? "Env: *${env.TARGET_ENV}*\n" : "") +
+              "Branch: *${env.BRANCH_NAME}*\n" +
+              "Commit: `${env.GIT_COMMIT_SHORT}`\n" +
+              "<${env.BUILD_URL}console|View Console Output>"
+          )
+=======
           mcSlack.notifyFailure(commitSubject: env.GIT_COMMIT_SUBJECT)
+>>>>>>> origin/Dev
         } catch (e) {
           echo "Slack not configured: ${e.message}"
         }
@@ -221,4 +257,9 @@ fi
       echo "Build URL: ${env.BUILD_URL}"
     }
   }
+<<<<<<< HEAD
+
+
+=======
+>>>>>>> origin/Dev
 }

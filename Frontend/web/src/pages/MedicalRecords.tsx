@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/Sidebar';
 import ScanViewer from '../components/ScanViewer';
+import NotificationIcon from '../components/NotificationIcon';
 import { apiUrl } from '../config/api';
 import './MedicalRecords.css';
 
@@ -67,9 +68,15 @@ interface MedicalRecord {
 
 interface Patient {
   id: string;
+  patient_id?: number;
+  userId?: string;
   firstName: string;
   lastName: string;
   fullName: string;
+  email?: string;
+  phoneNumber?: string;
+  dateOfBirth?: string;
+  gender?: string;
 }
 
 const MedicalRecords: React.FC = () => {
@@ -98,6 +105,9 @@ const MedicalRecords: React.FC = () => {
     file: null as File | null
   });
   const [uploading, setUploading] = useState(false);
+  
+  // Notification state
+  const [notifyingRecordId, setNotifyingRecordId] = useState<string | null>(null);
   
   // Form state
   const [showForm, setShowForm] = useState(false);
@@ -468,6 +478,41 @@ const MedicalRecords: React.FC = () => {
     }
   };
 
+  const handleNotifyPatient = async (recordId: string) => {
+    if (!token) {
+      setError('Not authenticated');
+      return;
+    }
+
+    setNotifyingRecordId(recordId);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch(apiUrl(`notifications/${recordId}/notify`), {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to send notification');
+      }
+
+      const data = await response.json();
+      setSuccess('Notification sent successfully to patient!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send notification');
+    } finally {
+      setNotifyingRecordId(null);
+    }
+  };
+
   const addDiagnosis = () => {
     setFormData({
       ...formData,
@@ -526,6 +571,7 @@ const MedicalRecords: React.FC = () => {
           <div className="header-right">
             {isAuthenticated ? (
               <div className="user-menu">
+                <NotificationIcon />
                 <span className="user-name">{user?.name || user?.email}</span>
                 <button className="logout-btn" onClick={async () => {
                   await logout();
@@ -565,7 +611,9 @@ const MedicalRecords: React.FC = () => {
               >
                 <option value="">All Patients</option>
                 {patients.map(p => (
-                  <option key={p.id} value={p.id}>{p.fullName}</option>
+                  <option key={p.id} value={p.id}>
+                    {p.fullName} {p.email ? `- ${p.email}` : ''}
+                  </option>
                 ))}
               </select>
             </div>
@@ -602,7 +650,9 @@ const MedicalRecords: React.FC = () => {
                     {loadingPatients ? 'Loading patients...' : patients.length === 0 ? 'No patients available' : 'Select Patient'}
                   </option>
                   {patients.map(p => (
-                    <option key={p.id} value={p.id}>{p.fullName}</option>
+                    <option key={p.id} value={p.id}>
+                      {p.fullName} {p.email ? `- ${p.email}` : ''}
+                    </option>
                   ))}
                 </select>
                 {patients.length === 0 && !loadingPatients && (
@@ -916,6 +966,27 @@ const MedicalRecords: React.FC = () => {
                       <div className="record-header-right">
                         <span className="badge">{record.visitType}</span>
                         {canManageRecords && (
+                          <>
+                            <button
+                              className="notify-patient-btn"
+                              onClick={() => handleNotifyPatient(record.id)}
+                              title="Notify Patient"
+                              aria-label="Notify Patient"
+                              disabled={notifyingRecordId === record.id}
+                              style={{
+                                marginRight: '8px',
+                                padding: '4px 8px',
+                                fontSize: '12px',
+                                background: '#4CAF50',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: notifyingRecordId === record.id ? 'wait' : 'pointer',
+                                opacity: notifyingRecordId === record.id ? 0.6 : 1
+                              }}
+                            >
+                              {notifyingRecordId === record.id ? 'Sending...' : '🔔 Notify Patient'}
+                            </button>
                           <button
                             className="edit-record-btn"
                             onClick={() => handleEdit(record)}
@@ -927,6 +998,7 @@ const MedicalRecords: React.FC = () => {
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                             </svg>
                           </button>
+                          </>
                         )}
                       </div>
                     </div>

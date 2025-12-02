@@ -1,7 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+<<<<<<< HEAD
+=======
 import { useAuth } from "../context/AuthContext";
+import { apiUrl } from "../config/api";
+>>>>>>> 1dc291f (Merge branch 'Dev' of https://github.com/Karan-Davda/MediConnect into Dev)
 import "../pages/Account.css";
 
 // --- Types ---
@@ -29,6 +33,7 @@ type Appointment = {
 
 // --- Mock data / session state (DF-In, CS, ET-In) ---
 const mockPatient = {
+  isAuthenticated: true, // flip to false to test entitlement
   id: "patient-123",
   name: "Jane Doe",
   insurance: "Blue Cross PPO",
@@ -76,41 +81,17 @@ const todayStr = new Date().toISOString().split("T")[0];
 
 const BookAppointment: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { user, isAuthenticated, hasRole } = useAuth();
-
-  // Check if user has permission to view this page (patients and admins only)
-  const hasAccess = !isAuthenticated || hasRole(['patient', 'admin']);
-
-  // If user is a doctor, redirect them away
-  useEffect(() => {
-    if (isAuthenticated && user?.role === 'doctor') {
-      navigate('/home');
-      return;
-    }
-  }, [isAuthenticated, user, navigate]);
-
-  // Don't render anything if user is a doctor
-  if (isAuthenticated && user?.role === 'doctor') {
-    return null;
-  }
 
   // matches Sidebar collapse behavior in Account view
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const toggleSidebar = () => setSidebarCollapsed(!sidebarCollapsed);
 
-  // Determine initial mode based on authentication status
-  const getInitialMode = () => {
-    if (!isAuthenticated) return "book";
-    return mockExistingAppt ? "reschedule" : "book";
-  };
-
-  const [mode, setMode] = useState<"book" | "reschedule" | "cancel">(getInitialMode());
-
-  // Reset mode when authentication status changes
-  useEffect(() => {
-    setMode(getInitialMode());
-  }, [isAuthenticated]);
+  // this page = ONE feature surface:
+  // "Allows users to book, reschedule, or cancel appointments based on the provider's availability."
+  // (02.01 Book Appointments for patient stakeholder 1.2) :contentReference[oaicite:1]{index=1}
+  const [mode, setMode] = useState<"book" | "reschedule" | "cancel">(
+    mockExistingAppt ? "reschedule" : "book"
+  );
 
   // form state with reschedule defaults
   const [selectedProviderId, setSelectedProviderId] = useState<string>(
@@ -139,7 +120,7 @@ const BookAppointment: React.FC = () => {
   function auditLog(action: string, details: any) {
     console.log("[AUDIT]", {
       action,
-      actor: user?.id || "anonymous",
+      actor: mockPatient.id,
       timestamp: new Date().toISOString(),
       details,
     });
@@ -167,10 +148,12 @@ const BookAppointment: React.FC = () => {
 
   // validation (FV, DDV, CC, ET-In/CS, DP)
   function validate(): string | null {
+    // ET-In / CS: must be signed in to take action
+    if (!mockPatient.isAuthenticated) {
+      return "You must sign in to manage appointments.";
+    }
+
     if (mode === "cancel") {
-      if (!isAuthenticated) {
-        return "You must sign in to cancel appointments.";
-      }
       if (!mockExistingAppt) {
         return "No appointment selected to cancel.";
       }
@@ -189,55 +172,8 @@ const BookAppointment: React.FC = () => {
     return null;
   }
 
-  // Handle redirect to login with return path
-  const handleLoginRedirect = () => {
-    // Store current form state and intended action
-    const currentState = {
-      selectedProviderId,
-      date,
-      time,
-      reason,
-      mode,
-    };
-    localStorage.setItem('bookingFormState', JSON.stringify(currentState));
-    localStorage.setItem('returnPath', '/book-appointment');
-    navigate('/login');
-  };
-
-  // Restore form state after login
-  useEffect(() => {
-    const savedState = localStorage.getItem('bookingFormState');
-    const returnPath = localStorage.getItem('returnPath');
-    
-    if (isAuthenticated && savedState && returnPath === '/book-appointment') {
-      try {
-        const state = JSON.parse(savedState);
-        setSelectedProviderId(state.selectedProviderId || "");
-        setDate(state.date || "");
-        setTime(state.time || "");
-        setReason(state.reason || "");
-        setMode(state.mode || "book");
-        
-        // Clean up stored state
-        localStorage.removeItem('bookingFormState');
-        localStorage.removeItem('returnPath');
-        
-        // Show success message about being logged in
-        setSuccessMsg("You're now logged in! You can proceed with your appointment booking.");
-      } catch (e) {
-        console.error('Failed to restore booking form state:', e);
-      }
-    }
-  }, [isAuthenticated]);
-
   // submit handler (CN, DF-Out, DF-In, NOT, ALR, ExHL)
   async function handleSubmit() {
-    // If not authenticated, redirect to login instead of showing error
-    if (!isAuthenticated) {
-      handleLoginRedirect();
-      return;
-    }
-
     const problem = validate();
     if (problem) {
       setErrorMsg(problem);
@@ -250,39 +186,83 @@ const BookAppointment: React.FC = () => {
     setSuccessMsg(null);
 
     try {
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+
       if (mode === "cancel") {
+        if (!mockExistingAppt) {
+          setErrorMsg("No appointment to cancel");
+          return;
+        }
+
+        const response = await fetch(`${apiUrl}/appointments/${mockExistingAppt.id}/status`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ status: 'cancelled' })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to cancel appointment');
+        }
+
         auditLog("CANCEL_APPOINTMENT", {
           apptId: mockExistingAppt?.id,
           providerId: mockExistingAppt?.providerId,
         });
 
         setSuccessMsg(
-          "Your appointment has been canceled. The provider has been notified and the slot is now available to other patients."
+          "Appointment cancelled! Notification sent via SMS and email."
         );
       } else {
         const payload = {
+<<<<<<< HEAD
+          patientId: mockPatient.id, // DF-In from Account/Profile (insurance, etc.)
+=======
           patientId: user?.id,
+          patientName: user?.name,
+          patientEmail: user?.email,
+          patientPhone: "+1234567890",
+>>>>>>> 1dc291f (Merge branch 'Dev' of https://github.com/Karan-Davda/MediConnect into Dev)
           providerId: selectedProviderId,
-          date,
-          time,
+          providerName: provider?.name,
+          appointmentDate: date,
+          appointmentTime: time,
+          duration: 30,
           reason,
+          type: "In-Person",
+          location: visitLocation,
           fee: visitFee,
-          mode,
         };
 
-        // CC: backend will lock slot to whoever confirms first
-        // CN / ExHL: if backend down, we catch in catch block
+        const response = await fetch(`${apiUrl}/appointments`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to create appointment');
+        }
+
+        const appointmentData = await response.json();
+
         auditLog(
           mode === "book"
             ? "BOOK_APPOINTMENT"
             : "RESCHEDULE_APPOINTMENT",
-          payload
+          appointmentData
         );
 
         setSuccessMsg(
           mode === "book"
-            ? "Your appointment request was submitted. You'll receive a confirmation and reminders."
-            : "Your reschedule request was submitted. You'll receive an updated confirmation and reminders."
+            ? "Appointment confirmed! Notification sent via SMS and email."
+            : "Appointment rescheduled! Notification sent via SMS and email."
         );
       }
 
@@ -291,7 +271,7 @@ const BookAppointment: React.FC = () => {
     } catch (err: any) {
       console.error("Appointment action failed:", err);
       setErrorMsg(
-        "We couldn't reach the server. Please check your connection and try again."
+        err.message || "We couldn't reach the server. Please check your connection and try again."
       );
       setSuccessMsg(null);
     } finally {
@@ -351,11 +331,6 @@ const BookAppointment: React.FC = () => {
                 >
                   Book, reschedule, or cancel your visit based on real-time
                   provider availability.
-                  {!isAuthenticated && (
-                    <span style={{ display: "block", marginTop: "0.5rem", fontWeight: "500", color: "#667eea" }}>
-                      Sign in to access scheduling and appointment management features.
-                    </span>
-                  )}
                 </p>
               </div>
 
@@ -378,13 +353,11 @@ const BookAppointment: React.FC = () => {
                       mode === "reschedule" ? "#667eea" : "#a0aec0",
                   }}
                   onClick={() => setMode("reschedule")}
-                  disabled={!isAuthenticated || !mockExistingAppt}
+                  disabled={!mockExistingAppt}
                   title={
-                    !isAuthenticated 
-                      ? "Sign in to reschedule appointments"
-                      : !mockExistingAppt
-                      ? "You don't have an appointment to reschedule."
-                      : ""
+                    mockExistingAppt
+                      ? ""
+                      : "You don't have an appointment to reschedule."
                   }
                 >
                   Reschedule
@@ -395,52 +368,17 @@ const BookAppointment: React.FC = () => {
                       mode === "cancel" ? "#667eea" : "#a0aec0",
                   }}
                   onClick={() => setMode("cancel")}
-                  disabled={!isAuthenticated || !mockExistingAppt}
+                  disabled={!mockExistingAppt}
                   title={
-                    !isAuthenticated
-                      ? "Sign in to cancel appointments"
-                      : !mockExistingAppt
-                      ? "You don't have an appointment to cancel."
-                      : ""
+                    mockExistingAppt
+                      ? ""
+                      : "You don't have an appointment to cancel."
                   }
                 >
                   Cancel
                 </button>
               </div>
             </div>
-
-            {/* Show login prompt for unauthenticated users */}
-            {!isAuthenticated && (
-              <div
-                style={{
-                  marginTop: "1rem",
-                  backgroundColor: "#e6fffa",
-                  color: "#234e52",
-                  borderRadius: "8px",
-                  padding: "0.75rem 1rem",
-                  fontSize: "0.9rem",
-                  fontWeight: 500,
-                  border: "1px solid #81e6d9",
-                }}
-              >
-                You can browse available appointments below. To book, reschedule, or cancel appointments, please{" "}
-                <button
-                  onClick={handleLoginRedirect}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "#667eea",
-                    textDecoration: "underline",
-                    cursor: "pointer",
-                    fontSize: "inherit",
-                    fontWeight: "600",
-                  }}
-                >
-                  sign in
-                </button>
-                {" "}to your account.
-              </div>
-            )}
 
             {/* inline alerts */}
             {errorMsg && (
@@ -483,7 +421,7 @@ const BookAppointment: React.FC = () => {
           <section className="account-section">
             {mode === "cancel" ? (
               <>
-                {mockExistingAppt && isAuthenticated ? (
+                {mockExistingAppt ? (
                   <>
                     <p style={{ color: "#4e7ac5ff", lineHeight: 1.5 }}>
                       You are canceling your appointment with{" "}
@@ -503,8 +441,6 @@ const BookAppointment: React.FC = () => {
                       other patients.
                     </p>
                   </>
-                ) : !isAuthenticated ? (
-                  <p>Please sign in to cancel appointments.</p>
                 ) : (
                   <p>No appointment found to cancel.</p>
                 )}
@@ -520,6 +456,9 @@ const BookAppointment: React.FC = () => {
                     setSelectedProviderId(e.target.value);
                     setTime("");
                   }}
+                  disabled={
+                    !mockPatient.isAuthenticated && mode !== "book"
+                  }
                 >
                   <option value="">Select a doctor</option>
                   {mockProviders.map((doc) => (
@@ -548,12 +487,10 @@ const BookAppointment: React.FC = () => {
                     <div>
                       <strong>Est. Fee:</strong> ${visitFee}
                     </div>
-                    {isAuthenticated && (
-                      <div>
-                        <strong>Insurance on file:</strong>{" "}
-                        {mockPatient.insurance}
-                      </div>
-                    )}
+                    <div>
+                      <strong>Insurance on file:</strong>{" "}
+                      {mockPatient.insurance}
+                    </div>
                   </div>
                 )}
 
@@ -568,6 +505,9 @@ const BookAppointment: React.FC = () => {
                     setDate(e.target.value);
                     setTime("");
                   }}
+                  disabled={
+                    !mockPatient.isAuthenticated && mode !== "book"
+                  }
                 />
 
                 {/* Time slots */}
@@ -596,6 +536,7 @@ const BookAppointment: React.FC = () => {
                       key={slot}
                       type="button"
                       onClick={() => setTime(slot)}
+                      disabled={!mockPatient.isAuthenticated}
                       style={{
                         color: "#0b0c0e",
                         border:
@@ -625,7 +566,7 @@ const BookAppointment: React.FC = () => {
                   }}
                 >
                   Slots are first-come, first-served. If someone else confirms
-                  first, you'll be asked to pick another.
+                  first, you’ll be asked to pick another.
                 </div>
 
                 {/* Reason */}
@@ -636,6 +577,7 @@ const BookAppointment: React.FC = () => {
                   placeholder="Example: Follow-up on bloodwork results"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
+                  disabled={!mockPatient.isAuthenticated}
                   style={{
                     width: "100%",
                     padding: "0.6rem 0.75rem",
@@ -721,7 +663,7 @@ const BookAppointment: React.FC = () => {
                     lineHeight: 1.4,
                   }}
                 >
-                  You'll receive confirmation and reminder notifications. If
+                  You’ll receive confirmation and reminder notifications. If
                   this is urgent, contact a clinic directly or call emergency
                   services.
                 </div>
@@ -744,8 +686,6 @@ const BookAppointment: React.FC = () => {
               >
                 {submitting
                   ? "Submitting..."
-                  : !isAuthenticated
-                  ? "Sign In to Book"
                   : mode === "cancel"
                   ? "Confirm Cancel"
                   : mode === "reschedule"
@@ -772,10 +712,8 @@ const BookAppointment: React.FC = () => {
                 lineHeight: 1.4,
               }}
             >
-              {!isAuthenticated 
-                ? "Sign in to book appointments and manage your healthcare schedule."
-                : "If you're offline when you submit, nothing will be scheduled. You'll see an error and can try again once you're reconnected."
-              }
+              If you’re offline when you submit, nothing will be scheduled.
+              You’ll see an error and can try again once you’re reconnected.
             </p>
           </section>
         </div>

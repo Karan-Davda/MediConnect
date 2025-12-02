@@ -8,30 +8,102 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
-const navItems = [
-  { path: "/home", icon: "📊", label: "Dashboard" },
-  { path: "/find-doctors", icon: "🔍", label: "Find Doctors" },
-  { path: "/book-appointment", icon: "📅", label: "Appointments" },
-  { path: "/medical-records", icon: "📋", label: "Medical Records" },
-  { path: "/prescriptions", icon: "💊", label: "Prescriptions" },
-  { path: "/insurance", icon: "🏥", label: "Insurance" },
-  { path: "/test-results", icon: "🧪", label: "Test Results" },
-  { path: "/account", icon: "👤", label: "Account" },
-  { path: "/billing", icon: "💳", label: "Billing" },
-];
-
-const adminNavItems = [
-  { path: "/clinic-operations", icon: "🏥", label: "Clinic Operations", roles: ["admin", "clinic_admin"] },
-  { path: "/access-control", icon: "🔐", label: "Access Control", roles: ["admin"] },
+// All navigation items with role-based access control
+const allNavItems = [
+  // Dashboard - Available to all authenticated users
+  { 
+    path: "/home", 
+    icon: "📊", 
+    label: "Dashboard", 
+    roles: ["patient", "doctor", "clinic_staff", "clinic_admin", "account_manager", "customer_success"] 
+  },
+  
+  // Patient-only items
+  { 
+    path: "/find-doctors", 
+    icon: "🔍", 
+    label: "Find Doctors", 
+    roles: ["patient"] 
+  },
+  { 
+    path: "/book-appointment", 
+    icon: "📅", 
+    label: "Appointments", 
+    roles: ["patient"] 
+  },
+  { 
+    path: "/billing", 
+    icon: "💳", 
+    label: "Billing", 
+    roles: ["patient"] 
+  },
+  
+  // Provider items (doctors, clinic staff, clinic admins)
+  { 
+    path: "/medical-records", 
+    icon: "📋", 
+    label: "Medical Records", 
+    roles: ["doctor", "clinic_staff", "clinic_admin"] 
+  },
+  { 
+    path: "/prescriptions", 
+    icon: "💊", 
+    label: "Prescriptions", 
+    roles: ["doctor", "clinic_staff", "clinic_admin"] 
+  },
+  
+  // Shared items (patients and providers)
+  { 
+    path: "/insurance", 
+    icon: "🏥", 
+    label: "Insurance", 
+    roles: ["patient", "doctor", "clinic_staff", "clinic_admin"] 
+  },
+  
+  // Admin items (separated for styling)
+  // Note: Account is in the footer, not in the main menu
+  { 
+    path: "/clinic-operations", 
+    icon: "🏥", 
+    label: "Clinic Operations", 
+    roles: ["clinic_admin"],
+    isAdmin: true 
+  },
+  { 
+    path: "/access-control", 
+    icon: "🔐", 
+    label: "Access Control", 
+    roles: ["clinic_admin"],
+    isAdmin: true 
+  },
 ];
 
 const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
   const { isAuthenticated, user, hasRole } = useAuth();
   const navigate = useNavigate();
 
-  const handleSettingsClick = () => {
-    navigate('/access-control');
+  const handleAccountClick = () => {
+    navigate('/account');
   };
+
+  // Filter menu items based on user role
+  const getVisibleMenuItems = () => {
+    if (!isAuthenticated || !user) {
+      return [];
+    }
+
+    return allNavItems.filter(item => {
+      if (!item.roles || item.roles.length === 0) {
+        return false; // Hide items without roles defined
+      }
+      return hasRole(item.roles);
+    });
+  };
+
+  // Separate regular items from admin items for styling
+  const visibleItems = getVisibleMenuItems();
+  const regularItems = visibleItems.filter(item => !item.isAdmin);
+  const adminItems = visibleItems.filter(item => item.isAdmin);
 
   return (
     <aside className={`sidebar ${isCollapsed ? "collapsed" : ""}`}>
@@ -47,11 +119,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
       {/* Navigation */}
       <nav className="sidebar-nav">
         <ul className="nav-list">
-          {navItems.map((item) => (
+          {/* Regular menu items */}
+          {regularItems.map((item) => (
             <li key={item.path} className="nav-item">
               <NavLink
                 to={item.path}
-                end={item.path === "/dashboard"} // keeps sub-routes like /appointments/book highlighted
+                end={item.path === "/home"}
                 className={({ isActive }) =>
                   `nav-link ${isActive ? "active" : ""}`
                 }
@@ -62,44 +135,42 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
             </li>
           ))}
 
-          {/* Admin Section */}
-          {isAuthenticated && user && adminNavItems.filter(item => hasRole(item.roles)).length > 0 && (
+          {/* Admin Section - Only show if there are admin items */}
+          {adminItems.length > 0 && (
             <>
               <li className="nav-divider">
                 <span className="divider-text">Administration</span>
               </li>
-              {adminNavItems
-                .filter(item => hasRole(item.roles))
-                .map((item) => (
-                  <li key={item.path} className="nav-item admin-nav-item">
-                    <NavLink
-                      to={item.path}
-                      className={({ isActive }) =>
-                        `nav-link ${isActive ? "active" : ""}`
-                      }
-                    >
-                      <span className="nav-icon">{item.icon}</span>
-                      <span className="nav-text">{item.label}</span>
-                    </NavLink>
-                  </li>
-                ))}
+              {adminItems.map((item) => (
+                <li key={item.path} className="nav-item admin-nav-item">
+                  <NavLink
+                    to={item.path}
+                    className={({ isActive }) =>
+                      `nav-link ${isActive ? "active" : ""}`
+                    }
+                  >
+                    <span className="nav-icon">{item.icon}</span>
+                    <span className="nav-text">{item.label}</span>
+                  </NavLink>
+                </li>
+              ))}
             </>
           )}
         </ul>
       </nav>
 
-      {/* Settings and Auth Section */}
+      {/* Account and Auth Section */}
       <div className="sidebar-footer">
-        {/* Settings Button - Only show for non-admin users or if they don't have admin nav */}
-        {(!isAuthenticated || !user || !hasRole(['admin'])) && (
+        {/* Account Button - Show for all authenticated users */}
+        {isAuthenticated && user && (
           <button
             className="settings-btn"
-            onClick={handleSettingsClick}
-            aria-label="Access Control Settings"
-            data-tooltip="Access Control"
+            onClick={handleAccountClick}
+            aria-label="Account Settings"
+            data-tooltip="Account"
           >
-            <span className="settings-icon">⚙️</span>
-            <span className="settings-text">Settings</span>
+            <span className="settings-icon">👤</span>
+            <span className="settings-text">Account</span>
           </button>
         )}
 

@@ -18,6 +18,8 @@ const {
   deleteMedicalRecord,
   getPatientMedicalHistory
 } = require('../repositories/MedicalRecordRepository');
+const PatientRepository = require('../repositories/PatientRepository');
+const { sendNotification } = require('../services/notificationService');
 
 const router = express.Router();
 
@@ -121,26 +123,52 @@ router.post('/patients', authenticate, canManageMedicalRecords, async (req, res)
 
 /**
  * GET /api/medical-records/patients
- * Get all patients (with optional search/filters)
+ * Get all patients from database (with email) for dropdowns
  */
 router.get('/patients', authenticate, canViewMedicalRecords, async (req, res) => {
   try {
-    const filters = {
-      search: req.query.search,
-      clinicId: req.query.clinicId
-    };
-
-    const patients = findAllPatients(filters);
+    // First, try to get from database
+    try {
+      const dbPatients = await PatientRepository.getAll();
+      
+      // Format patients for frontend: include email and use patient_id as id
+      const formattedPatients = dbPatients.map(p => ({
+        id: `patient_${p.patient_id}`, // Use consistent ID format
+        patient_id: p.patient_id, // Keep database ID
+        userId: p.user_id.toString(),
+        firstName: p.first_name || '',
+        lastName: p.last_name || '',
+        fullName: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown',
+        email: p.email || '',
+        phoneNumber: p.phone_number || '',
+        dateOfBirth: p.dob || null,
+        gender: p.gender || null
+      }));
 
     logAccess(req, AUDIT_ACTIONS.VIEW, {
       resourceType: 'PATIENT',
-      details: `Viewed ${patients.length} patients`
+        details: `Viewed ${formattedPatients.length} patients from database`
     });
 
+      return res.json({
+        count: formattedPatients.length,
+        patients: formattedPatients
+      });
+    } catch (dbError) {
+      // Database query failed - return empty list instead of fallback to static data
+      console.error('Database query failed:', dbError.message);
+      
+      logAccess(req, AUDIT_ACTIONS.VIEW, {
+        resourceType: 'PATIENT',
+        details: 'Failed to load patients from database'
+      });
+
+      // Return empty list - no fallback to static patients
     res.json({
-      count: patients.length,
-      patients: patients.map(p => p.toJSON())
+        count: 0,
+        patients: []
     });
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -221,8 +249,73 @@ router.post('/', authenticate, canManageMedicalRecords, async (req, res) => {
       return res.status(400).json({ error: 'patientId is required' });
     }
 
-    // Verify patient exists
-    const patient = findPatientById(recordData.patientId);
+    // Find patient - check both in-memory and database
+    let patient = findPatientById(recordData.patientId);
+    
+    // If not found in-memory, try database (patientId format: "patient_123")
+    if (!patient && recordData.patientId.startsWith('patient_')) {
+      const patientIdNum = parseInt(recordData.patientId.replace('patient_', ''));
+      if (!isNaN(patientIdNum)) {
+        try {
+          const dbPatient = await PatientRepository.findById(patientIdNum);
+          if (dbPatient) {
+            // Create patient in in-memory storage for notifications
+            patient = createPatient({
+              userId: dbPatient.user_id.toString(),
+              firstName: dbPatient.first_name || '',
+              lastName: dbPatient.last_name || '',
+              dateOfBirth: dbPatient.dob || null,
+              gender: dbPatient.gender || null,
+              phoneNumber: dbPatient.phone_number || '',
+              address: dbPatient.address ? (typeof dbPatient.address === 'string' ? JSON.parse(dbPatient.address) : dbPatient.address) : null,
+              emergencyContact: dbPatient.emergency_contact ? (typeof dbPatient.emergency_contact === 'string' ? JSON.parse(dbPatient.emergency_contact) : dbPatient.emergency_contact) : null,
+              insuranceInfo: null,
+              allergies: dbPatient.allergies ? (typeof dbPatient.allergies === 'string' ? JSON.parse(dbPatient.allergies) : dbPatient.allergies) : [],
+              medicalHistory: dbPatient.medical_history ? (typeof dbPatient.medical_history === 'string' ? JSON.parse(dbPatient.medical_history) : dbPatient.medical_history) : []
+            });
+            // Add email for notifications - CRITICAL for email notifications to work
+            patient.email = dbPatient.email;
+            // Update ID to match the format used by frontend
+            patient.id = recordData.patientId;
+            
+            console.log('📋 Patient synced from database for medical record:', {
+              patientId: patient.id,
+              name: patient.fullName,
+              email: patient.email || 'MISSING',
+              userId: patient.userId,
+              dbPatientHasEmail: !!dbPatient.email
+            });
+            
+            // If email is still missing, try to get from UserRepository
+            if (!patient.email && patient.userId) {
+              console.log('⚠️  Patient email missing, fetching from UserRepository...');
+              try {
+                const UserRepository = require('../repositories/UserRepository');
+                const user = await UserRepository.findById(parseInt(patient.userId));
+                if (user && user.email) {
+                  patient.email = user.email;
+                  console.log('✅ Email fetched from UserRepository:', user.email);
+                } else {
+                  console.warn('❌ User found but no email in UserRepository');
+                }
+              } catch (error) {
+                console.error('❌ Could not fetch patient email from user:', error.message);
+              }
+            }
+            
+            if (!patient.email) {
+              console.error('❌ CRITICAL: Patient email is still missing after all attempts!', {
+                patientId: patient.id,
+                userId: patient.userId
+              });
+            }
+          }
+        } catch (dbError) {
+          console.warn('Database lookup failed:', dbError.message);
+        }
+      }
+    }
+    
     if (!patient) {
       return res.status(404).json({ error: 'Patient not found' });
     }
@@ -241,6 +334,32 @@ router.post('/', authenticate, canManageMedicalRecords, async (req, res) => {
       resourceId: record.id,
       details: `Created medical record for patient: ${patient.fullName}`
     });
+
+    // Check for critical/abnormal lab results and trigger automatic notifications
+    const labResults = record.labResults || [];
+    const criticalOrAbnormalResults = labResults.filter(lr => 
+      lr.status === 'critical' || lr.status === 'abnormal'
+    );
+
+    if (criticalOrAbnormalResults.length > 0) {
+      // Get notification preferences from request body or use defaults
+      const preferences = req.body.notificationPreferences || {
+        emailReminders: true,
+        smsReminders: false
+      };
+
+      // Send notifications asynchronously (don't block the response)
+      Promise.all(
+        criticalOrAbnormalResults.map(labResult =>
+          sendNotification(patient, labResult, record, preferences).catch(error => {
+            console.error(`Failed to send notification for lab result ${labResult.testName}:`, error);
+            // Don't throw - we still want to return success for the record creation
+          })
+        )
+      ).catch(error => {
+        console.error('Error sending notifications:', error);
+      });
+    }
 
     res.status(201).json({
       message: 'Medical record added successfully',
@@ -395,6 +514,79 @@ router.put('/:id', authenticate, canManageMedicalRecords, async (req, res) => {
       resourceId: updatedRecord.id,
       details: 'Updated medical record'
     });
+
+    // Check for critical/abnormal lab results and trigger automatic notifications
+    const labResults = updatedRecord.labResults || [];
+    const criticalOrAbnormalResults = labResults.filter(lr => 
+      lr.status === 'critical' || lr.status === 'abnormal'
+    );
+
+    if (criticalOrAbnormalResults.length > 0) {
+      // Find patient for notification - check both in-memory and database
+      let patient = findPatientById(updatedRecord.patientId);
+      
+      // If not found in-memory, try database
+      if (!patient && updatedRecord.patientId && updatedRecord.patientId.startsWith('patient_')) {
+        const patientIdNum = parseInt(updatedRecord.patientId.replace('patient_', ''));
+        if (!isNaN(patientIdNum)) {
+          try {
+            const dbPatient = await PatientRepository.findById(patientIdNum);
+            if (dbPatient) {
+              patient = createPatient({
+                userId: dbPatient.user_id.toString(),
+                firstName: dbPatient.first_name || '',
+                lastName: dbPatient.last_name || '',
+                dateOfBirth: dbPatient.dob || null,
+                gender: dbPatient.gender || null,
+                phoneNumber: dbPatient.phone_number || '',
+                address: dbPatient.address ? (typeof dbPatient.address === 'string' ? JSON.parse(dbPatient.address) : dbPatient.address) : null,
+                emergencyContact: dbPatient.emergency_contact ? (typeof dbPatient.emergency_contact === 'string' ? JSON.parse(dbPatient.emergency_contact) : dbPatient.emergency_contact) : null,
+                insuranceInfo: null,
+                allergies: dbPatient.allergies ? (typeof dbPatient.allergies === 'string' ? JSON.parse(dbPatient.allergies) : dbPatient.allergies) : [],
+                medicalHistory: dbPatient.medical_history ? (typeof dbPatient.medical_history === 'string' ? JSON.parse(dbPatient.medical_history) : dbPatient.medical_history) : []
+              });
+              patient.email = dbPatient.email;
+              patient.id = updatedRecord.patientId;
+            }
+          } catch (dbError) {
+            console.warn('Database lookup failed:', dbError.message);
+          }
+        }
+      }
+      
+      // Ensure patient has email
+      if (patient && !patient.email && patient.userId) {
+        try {
+          const UserRepository = require('../repositories/UserRepository');
+          const user = await UserRepository.findById(parseInt(patient.userId));
+          if (user && user.email) {
+            patient.email = user.email;
+          }
+        } catch (error) {
+          console.warn('Could not fetch patient email from user:', error.message);
+        }
+      }
+      
+      if (patient) {
+        // Get notification preferences from request body or use defaults
+        const preferences = req.body.notificationPreferences || {
+          emailReminders: true,
+          smsReminders: false
+        };
+
+        // Send notifications asynchronously (don't block the response)
+        Promise.all(
+          criticalOrAbnormalResults.map(labResult =>
+            sendNotification(patient, labResult, updatedRecord, preferences).catch(error => {
+              console.error(`Failed to send notification for lab result ${labResult.testName}:`, error);
+              // Don't throw - we still want to return success for the record update
+            })
+          )
+        ).catch(error => {
+          console.error('Error sending notifications:', error);
+        });
+      }
+    }
 
     res.json({
       message: 'Medical record updated successfully',
