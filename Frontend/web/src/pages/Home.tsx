@@ -569,7 +569,6 @@ const Home: React.FC = () => {
           <div style={{ marginTop: 12, padding: 8, backgroundColor: "#f7fafc", borderRadius: 4, fontSize: 12, color: "#718096" }}>
             <strong>Selected Date:</strong> {new Date(selectedDate).toLocaleDateString()}
             <br />
-            <em>This is a simple calendar view for marketing admins to track important dates and deadlines.</em>
           </div>
         </div>
       </div>
