@@ -18,6 +18,7 @@ import BillingReportsPage from "./pages/BillingReportsPage";
 import BillingAuditLogPage from "./pages/BillingAuditLogPage";
 import Messages from "./pages/Message";
 import Claims from './pages/Claims'
+import MarketingCampaigns from './pages/MarketingCampaigns'
 import './App.css'
 
 function App() {
@@ -43,6 +44,7 @@ function App() {
       <Route path="/audit-log/billing" element={<BillingAuditLogPage />} />
       <Route path="/messages" element={<Messages />} />
       <Route path="/claims" element={<Claims />} />
+      <Route path="/marketing-campaigns" element={<MarketingCampaigns />} />
     </Routes>
   )
 }

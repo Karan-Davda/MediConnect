@@ -10,6 +10,8 @@ interface LoginFormData {
   rememberMe: boolean;
 }
 
+type LoginRole = 'patient' | 'clinic_admin' | 'marketing_admin';
+
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -18,6 +20,7 @@ const Login: React.FC = () => {
     password: '',
     rememberMe: false,
   });
+  const [loginRole, setLoginRole] = useState<LoginRole>('patient');
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [loading, setLoading] = useState(false);
@@ -62,16 +65,28 @@ const Login: React.FC = () => {
         localStorage.removeItem('rememberMe');
       }
 
-      // Check if user was redirected from booking page
+      // Persist chosen role for front-end demo (ET-In / AUT local override)
+      if (loginRole === 'patient') {
+        localStorage.removeItem('forcedRole');
+      } else {
+        localStorage.setItem('forcedRole', loginRole);
+      }
+
+      // Check if user was redirected from another page
       const returnPath = localStorage.getItem('returnPath');
-      
+
       if (returnPath) {
-        // Clear the return path and navigate back
         localStorage.removeItem('returnPath');
         navigate(returnPath);
       } else {
-        // Default redirect to home page
-        navigate('/home');
+        // Default redirect based on role
+        if (loginRole === 'marketing_admin') {
+          navigate('/marketing-campaigns');
+        } else if (loginRole === 'clinic_admin') {
+          navigate('/home-provider');
+        } else {
+          navigate('/home');
+        }
       }
     } catch (error: any) {
       setErrors({ password: error.message || 'Login failed' });

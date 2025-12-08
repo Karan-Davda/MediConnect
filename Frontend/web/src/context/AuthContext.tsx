@@ -5,7 +5,7 @@ interface User {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: string;        // e.g. 'patient', 'clinic_admin', 'marketing_admin', 'admin'
   clinicId?: string;
 }
 
@@ -31,7 +31,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     if (storedToken && storedUser) {
       setToken(storedToken);
-      setUser(JSON.parse(storedUser));
+      try {
+        const parsedUser: User = JSON.parse(storedUser);
+        setUser(parsedUser);
+      } catch {
+        // corrupted local storage, clear it
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      }
     }
   }, []);
 
@@ -48,10 +55,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ email, password }),
       });
 
-      // Check response status and content type
       const contentType = response.headers.get('content-type');
-      
-      // Handle 405 Method Not Allowed - usually means nginx blocking POST or wrong route
+
+      // 405 fallback handling
       if (response.status === 405) {
         console.warn('⚠️ Received 405 Method Not Allowed. Trying fallback with port 3001...');
         console.error('❌ First attempt failed:', {
@@ -59,18 +65,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           statusText: response.statusText,
           contentType,
           url: loginUrl,
-          method: 'POST'
+          method: 'POST',
         });
-        
-        // Fallback: Try with port 3001 if we're on AWS/hosting or IP address
+
         const hostname = window.location.hostname;
         const isIPAddress = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
         const isAWS = hostname.includes('ec2-') || hostname.includes('amazonaws.com');
+
         if ((isIPAddress || isAWS) && !loginUrl.includes(':3001')) {
           const protocol = window.location.protocol;
           const fallbackUrl = `${protocol}//${hostname}:3001/api/auth/login`;
           console.log('🔄 Retrying with fallback URL:', fallbackUrl);
-          
+
           try {
             response = await fetch(fallbackUrl, {
               method: 'POST',
@@ -79,14 +85,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               },
               body: JSON.stringify({ email, password }),
             });
-            
+
             console.log('📡 Fallback response status:', response.status);
-            
-            // Check if fallback also failed
+
             if (response.status === 405) {
-              throw new Error(`Method Not Allowed (405). The backend server may not be configured to accept POST requests. Check nginx configuration or backend server.`);
+              throw new Error(
+                'Method Not Allowed (405). The backend server may not be configured to accept POST requests.'
+              );
             }
-            
+
             const fallbackContentType = response.headers.get('content-type');
             if (!fallbackContentType || !fallbackContentType.includes('application/json')) {
               const fallbackText = await response.text();
@@ -94,45 +101,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 status: response.status,
                 contentType: fallbackContentType,
                 url: fallbackUrl,
-                preview: fallbackText.substring(0, 200)
+                preview: fallbackText.substring(0, 200),
               });
-              throw new Error(`Backend server not accessible. Check if backend is running on port 3001 and firewall rules allow access. (Status: ${response.status})`);
+              throw new Error(
+                `Backend server not accessible. Check if backend is running on port 3001. (Status: ${response.status})`
+              );
             }
-            
-            // Success! Continue with normal flow
+
             console.log('✅ Fallback succeeded!');
           } catch (fetchError: any) {
             console.error('❌ Fallback fetch failed:', fetchError);
-            if (fetchError.message.includes('405') || fetchError.message.includes('Method Not Allowed')) {
-              throw fetchError;
-            }
-            throw new Error(`Cannot connect to backend on port 3001. Check if backend is running and AWS Security Group allows port 3001. Error: ${fetchError.message}`);
+            throw fetchError;
           }
         } else {
-          throw new Error(`Method Not Allowed (405). Check if nginx is configured to proxy POST requests to /api/* or backend server is running correctly.`);
+          throw new Error(
+            'Method Not Allowed (405). Check nginx / backend configuration for POST /api/* routes.'
+          );
         }
       }
-      
-      // Check if response is HTML (error page) instead of JSON
+
+      // HTML error page instead of JSON → try fallback (similar logic)
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text();
-        console.warn('⚠️ Received HTML instead of JSON. Trying fallback with port 3001...');
+        console.warn('⚠️ Received non-JSON response. Trying fallback with port 3001...');
         console.error('❌ First attempt failed:', {
           status: response.status,
           contentType,
           url: loginUrl,
-          preview: text.substring(0, 200)
+          preview: text.substring(0, 200),
         });
-        
-        // Fallback: Try with port 3001 if we're on AWS/hosting or IP address
+
         const hostname = window.location.hostname;
         const isIPAddress = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
         const isAWS = hostname.includes('ec2-') || hostname.includes('amazonaws.com');
+
         if ((isIPAddress || isAWS) && !loginUrl.includes(':3001')) {
           const protocol = window.location.protocol;
           const fallbackUrl = `${protocol}//${hostname}:3001/api/auth/login`;
           console.log('🔄 Retrying with fallback URL:', fallbackUrl);
-          
+
           response = await fetch(fallbackUrl, {
             method: 'POST',
             headers: {
@@ -140,7 +147,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             },
             body: JSON.stringify({ email, password }),
           });
-          
+
           const fallbackContentType = response.headers.get('content-type');
           if (!fallbackContentType || !fallbackContentType.includes('application/json')) {
             const fallbackText = await response.text();
@@ -148,12 +155,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               status: response.status,
               contentType: fallbackContentType,
               url: fallbackUrl,
-              preview: fallbackText.substring(0, 200)
+              preview: fallbackText.substring(0, 200),
             });
-            throw new Error(`Backend server not accessible. Check if backend is running on port 3001 and firewall rules allow access. (Status: ${response.status})`);
+            throw new Error(
+              `Backend server not accessible. Check if backend is running on port 3001. (Status: ${response.status})`
+            );
           }
         } else {
-          throw new Error(`Server returned invalid response. Check if backend is running and API URL is correct. (${response.status})`);
+          throw new Error(
+            `Server returned invalid response. Check if backend is running and API URL is correct. (${response.status})`
+          );
         }
       }
 
@@ -164,6 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const data = await response.json();
 
+      // 🔑 Store token + user (including role: 'patient', 'clinic_admin', 'marketing_admin', 'admin', etc.)
       setToken(data.token);
       setUser(data.user);
 
@@ -180,7 +192,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await fetch('http://localhost:3001/api/auth/logout', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${token}`,
+            Authorization: `Bearer ${token}`,
           },
         });
       }
@@ -191,18 +203,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      // optional: also clear any demo override
+      localStorage.removeItem('forcedRole');
     }
   };
 
   const isAuthenticated = !!user && !!token;
 
+  // Helper: effective role (supports optional local demo override for marketing)
+  const getEffectiveRole = (): string | null => {
+    if (!user) return null;
+
+    // Optional demo override: you can set this manually in DevTools if needed
+    const forcedRole = localStorage.getItem('forcedRole');
+    if (forcedRole) return forcedRole;
+
+    return user.role;
+  };
+
   const hasRole = (roles: string[]) => {
-    if (!user) return false;
-    return roles.includes(user.role);
+    const role = getEffectiveRole();
+    if (!role) return false;
+
+    // Case-insensitive match, supports marketing_admin, clinic_admin, patient, admin
+    const normalized = role.toLowerCase().trim();
+    return roles.some((r) => r.toLowerCase().trim() === normalized);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isAuthenticated, hasRole }}>
+    <AuthContext.Provider
+      value={{ user, token, login, logout, isAuthenticated, hasRole }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -215,4 +246,3 @@ export const useAuth = () => {
   }
   return context;
 };
-

@@ -26,6 +26,12 @@ const adminNavItems = [
   { path: "/access-control", icon: "🔐", label: "Access Control", roles: ["admin"] },
 ];
 
+const marketingNavItems = [
+  { path: "/home", icon: "📊", label: "Dashboard" },
+  { path: "/marketing-campaigns", icon: "📢", label: "Marketing Campaigns" },
+  { path: "/account", icon: "👤", label: "Account" },
+];
+
 const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
   const { isAuthenticated, user, hasRole } = useAuth();
   const navigate = useNavigate();
@@ -33,6 +39,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
   const handleSettingsClick = () => {
     navigate('/access-control');
   };
+
+  // Check if user is marketing admin
+  const forcedRole = localStorage.getItem("forcedRole");
+  const effectiveRole = forcedRole || user?.role;
+  const isMarketingAdmin = !!effectiveRole && (effectiveRole === "marketing_admin" || hasRole(["marketing_admin"]));
 
   return (
     <aside className={`sidebar ${isCollapsed ? "collapsed" : ""}`}>
@@ -48,23 +59,42 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
       {/* Navigation */}
       <nav className="sidebar-nav">
         <ul className="nav-list">
-          {navItems.map((item) => (
-            <li key={item.path} className="nav-item">
-              <NavLink
-                to={item.path}
-                end={item.path === "/dashboard"} // keeps sub-routes like /appointments/book highlighted
-                className={({ isActive }) =>
-                  `nav-link ${isActive ? "active" : ""}`
-                }
-              >
-                <span className="nav-icon">{item.icon}</span>
-                <span className="nav-text">{item.label}</span>
-              </NavLink>
-            </li>
-          ))}
+          {isMarketingAdmin ? (
+            // Marketing admin gets limited navigation
+            marketingNavItems.map((item) => (
+              <li key={item.path} className="nav-item">
+                <NavLink
+                  to={item.path}
+                  end={item.path === "/home"} 
+                  className={({ isActive }) =>
+                    `nav-link ${isActive ? "active" : ""}`
+                  }
+                >
+                  <span className="nav-icon">{item.icon}</span>
+                  <span className="nav-text">{item.label}</span>
+                </NavLink>
+              </li>
+            ))
+          ) : (
+            // Regular navigation for other users
+            navItems.map((item) => (
+              <li key={item.path} className="nav-item">
+                <NavLink
+                  to={item.path}
+                  end={item.path === "/dashboard"} // keeps sub-routes like /appointments/book highlighted
+                  className={({ isActive }) =>
+                    `nav-link ${isActive ? "active" : ""}`
+                  }
+                >
+                  <span className="nav-icon">{item.icon}</span>
+                  <span className="nav-text">{item.label}</span>
+                </NavLink>
+              </li>
+            ))
+          )}
 
-          {/* Admin Section */}
-          {isAuthenticated && user && adminNavItems.filter(item => hasRole(item.roles)).length > 0 && (
+          {/* Admin Section - only for non-marketing admins */}
+          {!isMarketingAdmin && isAuthenticated && user && adminNavItems.filter(item => hasRole(item.roles)).length > 0 && (
             <>
               <li className="nav-divider">
                 <span className="divider-text">Administration</span>
@@ -92,7 +122,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
       {/* Settings and Auth Section */}
       <div className="sidebar-footer">
         {/* Settings Button - Only show for non-admin users or if they don't have admin nav */}
-        {(!isAuthenticated || !user || !hasRole(['admin'])) && (
+        {(!isAuthenticated || !user || (!hasRole(['admin']) && !isMarketingAdmin)) && (
           <button
             className="settings-btn"
             onClick={handleSettingsClick}
