@@ -1,0 +1,450 @@
+/* Global Styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body, html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  overflow-x: hidden;
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  background-color: #f5f5f5;
+}
+
+/* Dashboard Layout */
+.marketing-dashboard-container {
+  display: flex;
+  min-height: 100vh;
+  background-color: #f5f5f5;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+}
+
+/* Main Content */
+.marketing-main-content {
+  flex: 1;
+  margin-left: 250px;
+  display: flex;
+  flex-direction: column;
+  width: calc(100vw - 250px);
+  overflow-x: hidden;
+  position: relative;
+  transition: margin-left 0.3s ease, width 0.3s ease;
+  min-height: 100vh;
+}
+
+.marketing-main-content.sidebar-collapsed {
+  margin-left: 60px !important;
+  width: calc(100vw - 60px) !important;
+}
+
+/* Header */
+.marketing-header {
+  background-color: #e2e8f0;
+  padding: 1.25rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  width: 100%;
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: 900;
+}
+
+.marketing-header-left h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #2d3748;
+  margin: 0;
+}
+
+/* Dashboard Content */
+.marketing-dashboard-content {
+  padding: 2rem;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  box-sizing: border-box;
+}
+
+/* Sections */
+.marketing-section {
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  padding: 1.5rem 2rem;
+  transition: box-shadow 0.2s ease;
+}
+
+.marketing-section:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.marketing-section h2 {
+  font-size: 1.25rem;
+  color: #2d3748;
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+.marketing-section p {
+  color: #4a5568;
+  line-height: 1.6;
+  margin-bottom: 0.5rem;
+}
+
+/* Grid Layout */
+.marketing-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1.4fr;
+  gap: 2rem;
+  margin-top: 1rem;
+}
+
+/* Campaign List */
+.marketing-campaigns-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.marketing-campaigns-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.marketing-campaigns-header h3 {
+  margin: 0;
+  color: #2d3748;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.marketing-new-campaign-btn {
+  background-color: #667eea;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.25rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: background-color 0.3s ease;
+}
+
+.marketing-new-campaign-btn:hover:not(:disabled) {
+  background-color: #5a67d8;
+}
+
+.marketing-new-campaign-btn:disabled {
+  background-color: #a0aec0;
+  cursor: not-allowed;
+}
+
+.marketing-campaigns-container {
+  border: 1px solid #cbd5e0;
+  border-radius: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  background-color: #ffffff;
+}
+
+.marketing-campaigns-empty {
+  padding: 2rem;
+  color: #4a5568;
+  text-align: center;
+  font-style: italic;
+}
+
+.marketing-campaign-item {
+  padding: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  cursor: pointer;
+  background-color: transparent;
+  transition: background-color 0.2s ease;
+}
+
+.marketing-campaign-item:hover {
+  background-color: #f7fafc;
+}
+
+.marketing-campaign-item.selected {
+  background-color: #ebf4ff;
+  border-left: 4px solid #667eea;
+}
+
+.marketing-campaign-item:last-child {
+  border-bottom: none;
+}
+
+.marketing-campaign-name {
+  font-weight: 600;
+  color: #2d3748;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+}
+
+.marketing-campaign-status {
+  font-size: 0.875rem;
+  color: #4a5568;
+  margin-bottom: 0.25rem;
+}
+
+.marketing-campaign-date {
+  font-size: 0.75rem;
+  color: #718096;
+}
+
+.marketing-disclaimer {
+  font-size: 0.875rem;
+  color: #718096;
+  margin-top: 1rem;
+  line-height: 1.5;
+  padding: 1rem;
+  background-color: #f7fafc;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+/* Form Container */
+.marketing-form-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.marketing-form-title {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: #2d3748;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+/* Alerts */
+.marketing-form-alert {
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.marketing-form-alert.error {
+  background-color: #fed7d7;
+  border: 1px solid #feb2b2;
+  color: #c53030;
+}
+
+.marketing-form-alert.success {
+  background-color: #c6f6d5;
+  border: 1px solid #9ae6b4;
+  color: #22543d;
+}
+
+/* Form Grid */
+.marketing-form-grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+/* Form Labels and Inputs */
+.marketing-form-label {
+  display: flex;
+  flex-direction: column;
+}
+
+.marketing-form-label-text {
+  font-size: 0.95rem;
+  color: #2d3748;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.marketing-form-input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #cbd5e0;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.2s ease;
+}
+
+.marketing-form-input:focus {
+  border-color: #667eea;
+  outline: none;
+}
+
+.marketing-form-textarea {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #cbd5e0;
+  border-radius: 8px;
+  font-size: 1rem;
+  resize: vertical;
+  font-family: inherit;
+  transition: border-color 0.2s ease;
+}
+
+.marketing-form-textarea:focus {
+  border-color: #667eea;
+  outline: none;
+}
+
+.marketing-form-hint {
+  color: #718096;
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+  line-height: 1.4;
+}
+
+/* Channel Selection */
+.marketing-channels-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.marketing-channels-options {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+.marketing-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  color: #2d3748;
+  font-weight: 500;
+}
+
+.marketing-checkbox-label input[type="checkbox"] {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+}
+
+/* Schedule Container */
+.marketing-schedule-container {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.marketing-schedule-field {
+  flex: 1;
+}
+
+/* Action Buttons */
+.marketing-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.marketing-action-btn {
+  background-color: #667eea;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.25rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: background-color 0.3s ease;
+}
+
+.marketing-action-btn:hover:not(:disabled) {
+  background-color: #5a67d8;
+}
+
+.marketing-action-btn:disabled {
+  background-color: #a0aec0;
+  cursor: not-allowed;
+}
+
+.marketing-action-btn.secondary {
+  background-color: #4a5568;
+}
+
+.marketing-action-btn.secondary:hover:not(:disabled) {
+  background-color: #2d3748;
+}
+
+/* Loading State */
+.marketing-loading-state {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 3rem;
+  color: #4a5568;
+  font-size: 1rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .marketing-main-content {
+    margin-left: 200px;
+    width: calc(100vw - 200px);
+  }
+
+  .marketing-main-content.sidebar-collapsed {
+    margin-left: 50px !important;
+    width: calc(100vw - 50px) !important;
+  }
+
+  .marketing-header {
+    padding: 1rem;
+  }
+
+  .marketing-grid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .marketing-channels-options {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .marketing-schedule-container {
+    flex-direction: column;
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .marketing-main-content {
+    margin-left: 0;
+    width: 100vw;
+  }
+
+  .marketing-main-content.sidebar-collapsed {
+    margin-left: 0 !important;
+    width: 100vw !important;
+  }
+
+  .marketing-header {
+    justify-content: center;
+  }
+
+  .marketing-header-left h1 {
+    font-size: 1.5rem;
+  }
+
+  .marketing-dashboard-content {
+    padding: 1rem;
+  }
+
+  .marketing-actions {
+    flex-direction: column;
+  }
+}

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
-import "./Account.css";
+import "./MarketingCampaigns.css";
 
 type Channel = "EMAIL" | "SMS" | "IN_APP";
 type CampaignStatus = "DRAFT" | "SCHEDULED" | "ACTIVE" | "PAUSED" | "COMPLETED";
@@ -274,10 +274,12 @@ const MarketingCampaigns: React.FC = () => {
   if (!isAuthenticated || !isMarketingAdmin) {
     // Simple guard state while redirecting
     return (
-      <div className="dashboard-container">
-        <div className="main-content">
-          <div className="dashboard-content">
-            <p>Checking access…</p>
+      <div className="marketing-dashboard-container">
+        <div className="marketing-main-content">
+          <div className="marketing-dashboard-content">
+            <div className="marketing-loading-state">
+              <p>Checking access…</p>
+            </div>
           </div>
         </div>
       </div>
@@ -285,264 +287,224 @@ const MarketingCampaigns: React.FC = () => {
   }
 
   return (
-    <div className="dashboard-container">
+    <div className="marketing-dashboard-container">
       <Sidebar
         isCollapsed={sidebarCollapsed}
         onToggle={toggleSidebar}
       />
 
-      <div className={`main-content ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-        <header className="header">
-          <div className="header-left">
-            <h1 className="brand-title">MediConnect – Marketing</h1>
+      <div className={`marketing-main-content ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+        <header className="marketing-header">
+          <div className="marketing-header-left">
+            <h1>MediConnect – Marketing</h1>
           </div>
         </header>
 
-        <div
-          className="dashboard-content"
-          style={{ maxWidth: 1200, margin: "0 auto" }}
-        >
-          <section className="account-section" style={{ marginBottom: 16 }}>
+        <div className="marketing-dashboard-content">
+          <section className="marketing-section">
             <h2>Create & Manage Campaigns</h2>
-            <p style={{ color: "#4a5568", marginTop: 4 }}>
-              Design, schedule, and manage promotional campaigns without exposing PHI. 
-              Campaigns target segments (e.g., “patients overdue for annual visit”) rather 
-              than individual patient records.
+            <p>
+              Design, schedule, and manage promotional campaigns.
             </p>
           </section>
 
-          <section
-            className="account-section"
-            style={{ display: "grid", gridTemplateColumns: "1.1fr 1.4fr", gap: 24 }}
-          >
-            {/* Left: Campaign list (DF-In) */}
-            <div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 8,
-                }}
-              >
-                <h3 style={{ margin: 0 }}>Campaigns</h3>
-                <button
-                  onClick={() => setSelectedId("new")}
-                  disabled={saving}
-                >
-                  + New campaign
-                </button>
+          <section className="marketing-section">
+            <div className="marketing-grid">
+              {/* Left: Campaign list (DF-In) */}
+              <div className="marketing-campaigns-list">
+                <div className="marketing-campaigns-header">
+                  <h3>Campaigns</h3>
+                  <button
+                    className="marketing-new-campaign-btn"
+                    onClick={() => setSelectedId("new")}
+                    disabled={saving}
+                  >
+                    + New campaign
+                  </button>
+                </div>
+
+                <div className="marketing-campaigns-container">
+                  {sortedCampaigns.length === 0 ? (
+                    <p className="marketing-campaigns-empty">
+                      No campaigns yet. Create your first campaign.
+                    </p>
+                  ) : (
+                    sortedCampaigns.map((c) => (
+                      <div
+                        key={c.id}
+                        onClick={() => setSelectedId(c.id)}
+                        className={`marketing-campaign-item ${selectedId === c.id ? "selected" : ""}`}
+                      >
+                        <div className="marketing-campaign-name">{c.name}</div>
+                        <div className="marketing-campaign-status">
+                          {c.status} · {c.channels.join(", ")}
+                        </div>
+                        <div className="marketing-campaign-date">
+                          {c.startDate
+                            ? `From ${new Date(c.startDate).toLocaleString()}`
+                            : "No start date"}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
 
-              <div
-                style={{
-                  border: "1px solid #e2e8f0",
-                  borderRadius: 8,
-                  maxHeight: 360,
-                  overflowY: "auto",
-                }}
-              >
-                {sortedCampaigns.length === 0 ? (
-                  <p style={{ padding: 12, color: "#4a5568" }}>
-                    No campaigns yet. Create your first campaign.
-                  </p>
-                ) : (
-                  sortedCampaigns.map((c) => (
-                    <div
-                      key={c.id}
-                      onClick={() => setSelectedId(c.id)}
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid #edf2f7",
-                        cursor: "pointer",
-                        backgroundColor:
-                          selectedId === c.id ? "#ebf4ff" : "transparent",
-                      }}
-                    >
-                      <div style={{ fontWeight: 600 }}>{c.name}</div>
-                      <div style={{ fontSize: 12, color: "#4a5568", marginTop: 2 }}>
-                        {c.status} · {c.channels.join(", ")}
-                      </div>
-                      <div style={{ fontSize: 12, color: "#718096", marginTop: 2 }}>
-                        {c.startDate
-                          ? `From ${new Date(c.startDate).toLocaleString()}`
-                          : "No start date"}
-                      </div>
-                    </div>
-                  ))
+              {/* Right: Create / Edit form (FV, DP, DDD) */}
+              <div className="marketing-form-container">
+                <h3 className="marketing-form-title">
+                  {selectedId === "new" ? "New Campaign" : "Edit Campaign"}
+                </h3>
+
+                {error && (
+                  <div className="marketing-form-alert error">
+                    {error}
+                  </div>
                 )}
-              </div>
-              <p style={{ fontSize: 12, color: "#718096", marginTop: 8 }}>
-                Changes are stored locally in this Sprint. Future releases will 
-                persist campaigns to the backend and external email/SMS gateways 
-                (DF-Out, ET-Ex).
-              </p>
-            </div>
+                {success && (
+                  <div className="marketing-form-alert success">
+                    {success}
+                  </div>
+                )}
 
-            {/* Right: Create / Edit form (FV, DP, DDD) */}
-            <div>
-              <h3 style={{ marginTop: 0 }}>
-                {selectedId === "new" ? "New Campaign" : "Edit Campaign"}
-              </h3>
+                <div className="marketing-form-grid">
+                  <label className="marketing-form-label">
+                    <div className="marketing-form-label-text">Campaign name</div>
+                    <input
+                      className="marketing-form-input"
+                      value={form.name}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, name: e.target.value }))
+                      }
+                    />
+                  </label>
 
-              {error && (
-                <div
-                  className="form-alert error"
-                  style={{ marginBottom: 8 }}
-                >
-                  {error}
-                </div>
-              )}
-              {success && (
-                <div
-                  className="form-alert success"
-                  style={{ marginBottom: 8 }}
-                >
-                  {success}
-                </div>
-              )}
+                  <label className="marketing-form-label">
+                    <div className="marketing-form-label-text">Objective</div>
+                    <textarea
+                      className="marketing-form-textarea"
+                      rows={2}
+                      value={form.objective}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, objective: e.target.value }))
+                      }
+                    />
+                  </label>
 
-              <div style={{ display: "grid", gap: 10 }}>
-                <label>
-                  <div style={{ fontSize: 13 }}>Campaign name</div>
-                  <input
-                    className="form-input"
-                    value={form.name}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, name: e.target.value }))
-                    }
-                  />
-                </label>
+                  <label className="marketing-form-label">
+                    <div className="marketing-form-label-text">Target audience (segment)</div>
+                    <input
+                      className="marketing-form-input"
+                      placeholder="e.g., Patients with no annual visit in 12+ months"
+                      value={form.audienceSegment}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          audienceSegment: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
 
-                <label>
-                  <div style={{ fontSize: 13 }}>Objective</div>
-                  <textarea
-                    className="form-input"
-                    rows={2}
-                    value={form.objective}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, objective: e.target.value }))
-                    }
-                  />
-                </label>
+                  {/* Channels */}
+                  <div className="marketing-channels-container">
+                    <div className="marketing-form-label-text">Channels</div>
+                    <div className="marketing-channels-options">
+                      <label className="marketing-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={form.channels.includes("EMAIL")}
+                          onChange={(e) => updateChannel("EMAIL", e.target.checked)}
+                        />
+                        Email
+                      </label>
+                      <label className="marketing-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={form.channels.includes("SMS")}
+                          onChange={(e) => updateChannel("SMS", e.target.checked)}
+                        />
+                        SMS
+                      </label>
+                      <label className="marketing-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={form.channels.includes("IN_APP")}
+                          onChange={(e) => updateChannel("IN_APP", e.target.checked)}
+                        />
+                        In-app
+                      </label>
+                    </div>
+                  </div>
 
-                <label>
-                  <div style={{ fontSize: 13 }}>Target audience (segment)</div>
-                  <input
-                    className="form-input"
-                    placeholder="e.g., Patients with no annual visit in 12+ months"
-                    value={form.audienceSegment}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        audienceSegment: e.target.value,
-                      }))
-                    }
-                  />
-                  <small style={{ color: "#718096" }}>
-                    DP: Use segments, not individual patient names or IDs.
-                  </small>
-                </label>
-
-                {/* Channels */}
-                <div>
-                  <div style={{ fontSize: 13 }}>Channels</div>
-                  <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {/* Schedule */}
+                  <div className="marketing-schedule-container">
+                    <label className="marketing-form-label marketing-schedule-field">
+                      <div className="marketing-form-label-text">Start date & time</div>
                       <input
-                        type="checkbox"
-                        checked={form.channels.includes("EMAIL")}
-                        onChange={(e) => updateChannel("EMAIL", e.target.checked)}
+                        type="datetime-local"
+                        className="marketing-form-input"
+                        value={form.startDate}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, startDate: e.target.value }))
+                        }
                       />
-                      Email
                     </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <label className="marketing-form-label marketing-schedule-field">
+                      <div className="marketing-form-label-text">End date & time (optional)</div>
                       <input
-                        type="checkbox"
-                        checked={form.channels.includes("SMS")}
-                        onChange={(e) => updateChannel("SMS", e.target.checked)}
+                        type="datetime-local"
+                        className="marketing-form-input"
+                        value={form.endDate}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, endDate: e.target.value }))
+                        }
                       />
-                      SMS
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <input
-                        type="checkbox"
-                        checked={form.channels.includes("IN_APP")}
-                        onChange={(e) => updateChannel("IN_APP", e.target.checked)}
-                      />
-                      In-app
                     </label>
                   </div>
-                  <small style={{ color: "#718096" }}>
-                    FV: At least one channel is required. SMS has stricter length limits.
-                  </small>
-                </div>
 
-                {/* Schedule */}
-                <div style={{ display: "flex", gap: 12 }}>
-                  <label style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13 }}>Start date & time</div>
+                  {/* Content */}
+                  <label className="marketing-form-label">
+                    <div className="marketing-form-label-text">Subject / Title</div>
                     <input
-                      type="datetime-local"
-                      className="form-input"
-                      value={form.startDate}
+                      className="marketing-form-input"
+                      value={form.subject}
                       onChange={(e) =>
-                        setForm((prev) => ({ ...prev, startDate: e.target.value }))
+                        setForm((prev) => ({ ...prev, subject: e.target.value }))
                       }
                     />
                   </label>
-                  <label style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13 }}>End date & time (optional)</div>
-                    <input
-                      type="datetime-local"
-                      className="form-input"
-                      value={form.endDate}
+
+                  <label className="marketing-form-label">
+                    <div className="marketing-form-label-text">Message body</div>
+                    <textarea
+                      className="marketing-form-textarea"
+                      rows={4}
+                      value={form.body}
                       onChange={(e) =>
-                        setForm((prev) => ({ ...prev, endDate: e.target.value }))
+                        setForm((prev) => ({ ...prev, body: e.target.value }))
                       }
                     />
                   </label>
+
+                  {/* Actions */}
+                  <div className="marketing-actions">
+                    <button 
+                      className="marketing-action-btn secondary"
+                      onClick={handleSaveDraft} 
+                      disabled={saving}
+                    >
+                      {saving ? "Saving…" : "Save as draft"}
+                    </button>
+                    <button 
+                      className="marketing-action-btn"
+                      onClick={handleSchedule} 
+                      disabled={saving}
+                    >
+                      {saving ? "Scheduling…" : "Schedule campaign"}
+                    </button>
+                  </div>
                 </div>
-
-                {/* Content */}
-                <label>
-                  <div style={{ fontSize: 13 }}>Subject / Title</div>
-                  <input
-                    className="form-input"
-                    value={form.subject}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, subject: e.target.value }))
-                    }
-                  />
-                </label>
-
-                <label>
-                  <div style={{ fontSize: 13 }}>Message body</div>
-                  <textarea
-                    className="form-input"
-                    rows={4}
-                    value={form.body}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, body: e.target.value }))
-                    }
-                  />
-                </label>
-
-                {/* Actions */}
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button onClick={handleSaveDraft} disabled={saving}>
-                    {saving ? "Saving…" : "Save as draft"}
-                  </button>
-                  <button onClick={handleSchedule} disabled={saving}>
-                    {saving ? "Scheduling…" : "Schedule campaign"}
-                  </button>
-                </div>
-
-                <p style={{ fontSize: 12, color: "#718096" }}>
-                  When integrated with backend services, scheduled campaigns will 
-                  automatically send via configured email/SMS gateways (DF-Out, NOT). 
-                  This Sprint focuses on UI, validation, and entitlements (ET-In, DP, FV).
-                </p>
               </div>
             </div>
           </section>
