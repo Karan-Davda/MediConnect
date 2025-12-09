@@ -110,6 +110,9 @@ app.listen(PORT, () => {
   console.log(`🚀 MediConnect Backend Server running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔐 API endpoints available under /api`);
+
+  reminderScheduler.start();
+  console.log('📅 Appointment reminder scheduler started');
 });
 
 module.exports = app;

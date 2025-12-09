@@ -236,6 +236,50 @@ const Home: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Messages Widget – preview for 5.03 Message Patient */}
+        <div className="widget messages-widget">
+          <div className="widget-header">
+            <span className="widget-icon">💬</span>
+            <h3 className="widget-title">Messages</h3>
+          </div>
+          <div className="widget-content">
+            {/* DDD: Role-specific message previews */}
+            <div className="message-preview-item">
+              <div className="message-preview-main">
+                <div className="message-preview-name">Jane Doe (Patient)</div>
+                <div className="message-preview-snippet">
+                  Thank you for the follow-up instructions.
+                </div>
+              </div>
+              <div className="message-preview-meta">
+                <span className="message-preview-date">Nov 30</span>
+                <span className="message-unread-dot" />
+              </div>
+            </div>
+
+            <div className="message-preview-item">
+              <div className="message-preview-main">
+                <div className="message-preview-name">Clinic Administration</div>
+                <div className="message-preview-snippet">
+                  Schedule update: Room 3 will be unavailable tomorrow.
+                </div>
+              </div>
+              <div className="message-preview-meta">
+                <span className="message-preview-date">Nov 29</span>
+              </div>
+            </div>
+
+            <button
+              className="admin-widget-btn"
+              style={{ marginTop: 12 }}
+              onClick={() => navigate("/messages")}
+            >
+              <span>📥</span>
+              <span>Open Messages</span>
+            </button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -347,6 +391,50 @@ const Home: React.FC = () => {
               <span className="action-icon">✉️</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Messages Widget – preview for 5.03 Message Patient */}
+      <div className="widget messages-widget">
+        <div className="widget-header">
+          <span className="widget-icon">💬</span>
+          <h3 className="widget-title">Messages</h3>
+        </div>
+        <div className="widget-content">
+          {/* DDD: Admin-specific message previews */}
+          <div className="message-preview-item">
+            <div className="message-preview-main">
+              <div className="message-preview-name">System Administrator</div>
+              <div className="message-preview-snippet">
+                Billing system maintenance scheduled for tonight at 11 PM.
+              </div>
+            </div>
+            <div className="message-preview-meta">
+              <span className="message-preview-date">Nov 30</span>
+              <span className="message-unread-dot" />
+            </div>
+          </div>
+
+          <div className="message-preview-item">
+            <div className="message-preview-main">
+              <div className="message-preview-name">Dr. Johnson</div>
+              <div className="message-preview-snippet">
+                Need approval for new equipment purchase order.
+              </div>
+            </div>
+            <div className="message-preview-meta">
+              <span className="message-preview-date">Nov 29</span>
+            </div>
+          </div>
+
+          <button
+            className="admin-widget-btn"
+            style={{ marginTop: 12 }}
+            onClick={() => navigate("/messages")}
+          >
+            <span>📥</span>
+            <span>Open Messages</span>
+          </button>
         </div>
       </div>
     </div>
