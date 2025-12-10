@@ -9,6 +9,7 @@ const prescriptionRoutes = require('./src/routes/prescriptions');
 const insuranceRoutes = require('./src/routes/insurance');
 const claimsRoutes = require('./src/routes/claims');
 const appointmentsRoutes = require('./src/routes/appointments');
+const campaignsRoutes = require('./src/routes/campaigns');
 const reminderScheduler = require('./src/services/reminderScheduler');
 const { authenticate } = require('./src/middleware/auth');
 
@@ -87,6 +88,7 @@ app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/insurance', insuranceRoutes);
 app.use('/api/claims', claimsRoutes);
 app.use('/api/appointments', appointmentsRoutes);
+app.use('/api/campaigns', campaignsRoutes);
 
 app.get('/api/protected', authenticate, (req, res) => {
   res.json({

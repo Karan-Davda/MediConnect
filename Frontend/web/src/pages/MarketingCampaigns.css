@@ -448,3 +448,78 @@ body, html {
     flex-direction: column;
   }
 }
+.marketing-form-section {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  background-color: #f7fafc;
+}
+
+.marketing-demographic-group {
+  margin-top: 1rem;
+}
+
+.marketing-demographic-group:first-child {
+  margin-top: 0.5rem;
+}
+
+.marketing-demographic-label {
+  display: block;
+  font-size: 0.9rem;
+  color: #4a5568;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.marketing-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.marketing-age-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.marketing-age-inputs input {
+  flex: 1;
+  max-width: 120px;
+}
+
+.marketing-age-inputs span {
+  color: #718096;
+  font-size: 0.9rem;
+}
+
+.marketing-date-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.marketing-date-inputs input {
+  flex: 1;
+}
+
+.marketing-date-inputs span {
+  color: #718096;
+  font-size: 0.9rem;
+}
+
+.marketing-reach-indicator {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background-color: #ebf4ff;
+  border-left: 4px solid #667eea;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  color: #2d3748;
+}
+
+.marketing-reach-indicator strong {
+  color: #667eea;
+  font-size: 1.1rem;
+}
