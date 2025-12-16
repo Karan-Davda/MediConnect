@@ -1,8 +1,6 @@
 // Jenkinsfile — MediConnect (Multibranch) with NVM + Slack + Deploy to Dev/QA
 
 @Library('mediconnectLib') _
-import mcSlack
-import mcDeploy
 
 pipeline {
   agent any
@@ -189,7 +187,8 @@ fi
       }
       steps {
         script {
-          mcDeploy.deployFrontendAndBackend()
+          // call shared library global step
+          mcDeploy(this)
         }
       }
     }
