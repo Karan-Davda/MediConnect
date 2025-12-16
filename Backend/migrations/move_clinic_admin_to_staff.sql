@@ -66,3 +66,5 @@ LEFT JOIN doctors d ON u.user_id = d.user_id
 LEFT JOIN clinic_staff cs ON u.user_id = cs.user_id
 WHERE r.role_name = 'clinic_admin';
 
+
+

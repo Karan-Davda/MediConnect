@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiUrl } from '../config/api';
@@ -45,10 +45,7 @@ interface OnboardingData {
 
 const LANGUAGE_OPTIONS = [
   'English', 'Spanish', 'French', 'German', 'Mandarin', 'Hindi', 
-  'Arabic', 'Portuguese', 'Russian', 'Japanese', 'Korean', 'Italian',
-  'Dutch', 'Polish', 'Turkish', 'Vietnamese', 'Thai', 'Greek',
-  'Hebrew', 'Swedish', 'Norwegian', 'Danish', 'Finnish', 'Czech',
-  'Romanian', 'Hungarian', 'Bulgarian', 'Croatian', 'Serbian', 'Other'
+  'Arabic', 'Portuguese', 'Russian', 'Japanese', 'Korean', 'Other'
 ];
 
 const INSURANCE_OPTIONS = [
@@ -59,19 +56,9 @@ const INSURANCE_OPTIONS = [
 const CompleteProfile: React.FC = () => {
   const { user, token } = useAuth();
   const navigate = useNavigate();
-  
-  // Clinic admins skip Step 1 (License & Certification), start at Step 2
-  const isClinicAdmin = user?.role === 'clinic_admin';
-  const startStep = isClinicAdmin ? 2 : 1;
-  const totalSteps = isClinicAdmin ? 3 : 4;
-  
-  const [currentStep, setCurrentStep] = useState(startStep);
+  const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
-  const [languageInput, setLanguageInput] = useState('');
-  const [languageSuggestions, setLanguageSuggestions] = useState<string[]>([]);
-  const [showLanguageSuggestions, setShowLanguageSuggestions] = useState(false);
-  const dateInputRef = useRef<HTMLInputElement>(null);
   
   const [formData, setFormData] = useState<OnboardingData>({
     licenseNumber: '',
@@ -121,8 +108,7 @@ const CompleteProfile: React.FC = () => {
   const validateStep = (step: number): boolean => {
     const newErrors: { [key: string]: string } = {};
 
-    // Step 1: License & Certification (only for doctors)
-    if (step === 1 && !isClinicAdmin) {
+    if (step === 1) {
       if (!formData.licenseNumber.trim()) newErrors.licenseNumber = 'License number is required';
       if (!formData.npi.trim()) newErrors.npi = 'NPI / Provider ID is required';
       if (formData.npi && !/^\d{10}$/.test(formData.npi.replace(/\D/g, ''))) {
@@ -130,23 +116,18 @@ const CompleteProfile: React.FC = () => {
       }
       if (!formData.issuingAuthority.trim()) newErrors.issuingAuthority = 'Issuing authority is required';
       if (!formData.licenseExpiryDate) newErrors.licenseExpiryDate = 'License expiry date is required';
-    } 
-    // Step 2: Professional Information (Step 1 for clinic admins)
-    else if (step === 2) {
+    } else if (step === 2) {
       if (!formData.yearsOfExperience.trim()) newErrors.yearsOfExperience = 'Years of experience is required';
       if (user?.role === 'doctor' && !formData.medicalSchool.trim()) {
         newErrors.medicalSchool = 'Medical school is required';
       }
-    } 
-    // Step 3: Practice Information (Step 2 for clinic admins)
-    else if (step === 3) {
+    } else if (step === 3) {
       if (!formData.officeAddress.trim()) newErrors.officeAddress = 'Office address is required';
       if (!formData.officeCity.trim()) newErrors.officeCity = 'Office city is required';
       if (!formData.officeState.trim()) newErrors.officeState = 'Office state is required';
       if (!formData.officeZip.trim()) newErrors.officeZip = 'Office ZIP code is required';
       if (!formData.officePhone.trim()) newErrors.officePhone = 'Office phone is required';
     }
-    // Step 4: Preferences (Step 3 for clinic admins) - no validation needed
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -154,8 +135,7 @@ const CompleteProfile: React.FC = () => {
 
   const handleNext = () => {
     if (validateStep(currentStep)) {
-      const lastStep = isClinicAdmin ? 4 : 4; // Both end at step 4
-      if (currentStep < lastStep) {
+      if (currentStep < 4) {
         setCurrentStep(currentStep + 1);
       } else {
         handleSubmit();
@@ -164,7 +144,7 @@ const CompleteProfile: React.FC = () => {
   };
 
   const handleBack = () => {
-    if (currentStep > startStep) {
+    if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
       setErrors({});
     }
@@ -174,20 +154,8 @@ const CompleteProfile: React.FC = () => {
     if (!validateStep(4)) return;
 
     setLoading(true);
-    setErrors({});
     try {
-      const url = apiUrl('auth/complete-profile');
-      console.log('Submitting profile to:', url);
-      console.log('Token available:', !!token);
-      console.log('Form data:', formData);
-      
-      if (!token) {
-        setErrors({ submit: 'Authentication token is missing. Please log in again.' });
-        setLoading(false);
-        return;
-      }
-      
-      const response = await fetch(url, {
+      const response = await fetch(apiUrl('auth/complete-profile'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -196,33 +164,17 @@ const CompleteProfile: React.FC = () => {
         body: JSON.stringify(formData),
       });
 
-      console.log('Response status:', response.status);
-      console.log('Response ok:', response.ok);
-      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
-
       if (!response.ok) {
-        let errorData;
-        try {
-          const text = await response.text();
-          console.log('Error response text:', text);
-          errorData = JSON.parse(text);
-        } catch (e) {
-          errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
-        }
-        console.error('Error response:', errorData);
-        setErrors({ submit: errorData.error || `Failed to complete profile (${response.status})` });
-        setLoading(false);
-        return;
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save profile');
       }
 
-      const data = await response.json();
-      console.log('Profile completed successfully:', data);
-      
-      // Redirect to home
+      // Redirect to home after successful completion
       navigate('/home');
     } catch (error: any) {
-      console.error('Profile submission error:', error);
-      setErrors({ submit: error.message || 'Network error. Please check your connection and try again.' });
+      console.error('Profile completion error:', error);
+      setErrors({ submit: error.message || 'Failed to save profile. Please try again.' });
+    } finally {
       setLoading(false);
     }
   };
@@ -234,36 +186,12 @@ const CompleteProfile: React.FC = () => {
     }
   };
 
-  const handleLanguageInputChange = (value: string) => {
-    setLanguageInput(value);
-    if (value.length >= 1) {
-      const filtered = LANGUAGE_OPTIONS.filter(lang =>
-        lang.toLowerCase().startsWith(value.toLowerCase()) &&
-        !formData.languages.includes(lang)
-      );
-      setLanguageSuggestions(filtered);
-      setShowLanguageSuggestions(filtered.length > 0);
-    } else {
-      setLanguageSuggestions([]);
-      setShowLanguageSuggestions(false);
-    }
-  };
-
-  const handleLanguageSelect = (language: string) => {
-    if (!formData.languages.includes(language)) {
-      setFormData(prev => ({
-        ...prev,
-        languages: [...prev.languages, language]
-      }));
-    }
-    setLanguageInput('');
-    setShowLanguageSuggestions(false);
-  };
-
-  const handleLanguageRemove = (language: string) => {
+  const handleLanguageToggle = (language: string) => {
     setFormData(prev => ({
       ...prev,
-      languages: prev.languages.filter(l => l !== language)
+      languages: prev.languages.includes(language)
+        ? prev.languages.filter(l => l !== language)
+        : [...prev.languages, language]
     }));
   };
 
@@ -303,24 +231,20 @@ const CompleteProfile: React.FC = () => {
 
         {/* Progress Indicator */}
         <div className="progress-indicator">
-          <div className="progress-line" style={{ width: `${((currentStep - startStep) / (totalSteps - 1)) * 100}%` }}></div>
-          {Array.from({ length: totalSteps }, (_, i) => i + 1).map((displayStep) => {
-            // Map display step to actual step number
-            const actualStep = isClinicAdmin ? displayStep + 1 : displayStep;
-            return (
-              <div
-                key={displayStep}
-                className={`progress-step ${currentStep >= actualStep ? 'active' : ''} ${currentStep === actualStep ? 'current' : ''}`}
-              >
-                {displayStep}
-              </div>
-            );
-          })}
+          <div className="progress-line" style={{ width: `${((currentStep - 1) / 3) * 100}%` }}></div>
+          {[1, 2, 3, 4].map((step) => (
+            <div
+              key={step}
+              className={`progress-step ${currentStep >= step ? 'active' : ''} ${currentStep === step ? 'current' : ''}`}
+            >
+              {step}
+            </div>
+          ))}
         </div>
 
         {/* Step Content */}
         <div className="step-content">
-          {currentStep === 1 && !isClinicAdmin && (
+          {currentStep === 1 && (
             <div className="step-section">
               <h2>License & Certification Information</h2>
               
@@ -374,89 +298,13 @@ const CompleteProfile: React.FC = () => {
                 <label htmlFor="licenseExpiryDate">
                   License Expiry Date <span className="required">*</span>
                 </label>
-                <div className="date-input-wrapper">
-                  <input
-                    ref={dateInputRef}
-                    type="date"
-                    id="licenseExpiryDate"
-                    className={`date-input ${errors.licenseExpiryDate ? 'error' : ''}`}
-                    value={formData.licenseExpiryDate}
-                    onChange={(e) => handleChange('licenseExpiryDate', e.target.value)}
-                    onClick={(e) => {
-                      // Only open picker if clicking on the input itself (not when pasting)
-                      // Check if this is a click event (not paste)
-                      if (e.type === 'click') {
-                        const input = e.currentTarget;
-                        // Try to open the picker
-                        if (input.showPicker && typeof input.showPicker === 'function') {
-                          try {
-                            input.showPicker();
-                          } catch (err) {
-                            // If showPicker fails, just focus (which should open picker in most browsers)
-                            input.focus();
-                          }
-                        } else {
-                          // Fallback: focus the input which should trigger the picker
-                          input.focus();
-                        }
-                      }
-                    }}
-                    onFocus={(e) => {
-                      // Open date picker on focus (but allow pasting first)
-                      const input = e.currentTarget;
-                      // Small delay to allow paste to complete
-                      setTimeout(() => {
-                        if (input.showPicker && typeof input.showPicker === 'function') {
-                          try {
-                            input.showPicker();
-                          } catch (err) {
-                            // Ignore if showPicker fails
-                          }
-                        }
-                      }, 100);
-                    }}
-                    onPaste={(e) => {
-                      // Don't prevent default - allow normal paste, then parse
-                      const pastedText = e.clipboardData.getData('text');
-                      
-                      // Small delay to let the paste happen, then parse and format
-                      setTimeout(() => {
-                        // Try to parse common date formats
-                        const dateFormats = [
-                          /(\d{4})-(\d{2})-(\d{2})/, // YYYY-MM-DD
-                          /(\d{2})\/(\d{2})\/(\d{4})/, // MM/DD/YYYY
-                          /(\d{2})-(\d{2})-(\d{4})/, // MM-DD-YYYY
-                          /(\d{4})\/(\d{2})\/(\d{2})/, // YYYY/MM/DD
-                        ];
-                        
-                        for (const format of dateFormats) {
-                          const match = pastedText.match(format);
-                          if (match) {
-                            let year, month, day;
-                            if (format === dateFormats[0] || format === dateFormats[3]) {
-                              // YYYY-MM-DD or YYYY/MM/DD
-                              year = match[1];
-                              month = match[2];
-                              day = match[3];
-                            } else {
-                              // MM/DD/YYYY or MM-DD-YYYY
-                              month = match[1];
-                              day = match[2];
-                              year = match[3];
-                            }
-                            const formattedDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-                            handleChange('licenseExpiryDate', formattedDate);
-                            return;
-                          }
-                        }
-                        // If no format matches, try to use the text as-is if it looks like a date
-                        if (pastedText.length >= 8 && /^\d/.test(pastedText)) {
-                          handleChange('licenseExpiryDate', pastedText);
-                        }
-                      }, 10);
-                    }}
-                  />
-                </div>
+                <input
+                  type="date"
+                  id="licenseExpiryDate"
+                  className={errors.licenseExpiryDate ? 'error' : ''}
+                  value={formData.licenseExpiryDate}
+                  onChange={(e) => handleChange('licenseExpiryDate', e.target.value)}
+                />
                 {errors.licenseExpiryDate && <span className="error-message">{errors.licenseExpiryDate}</span>}
               </div>
 
@@ -526,60 +374,17 @@ const CompleteProfile: React.FC = () => {
 
               <div className="form-group">
                 <label>Languages Spoken</label>
-                <div className="language-input-container">
-                  {/* Selected languages as chips */}
-                  {formData.languages.length > 0 && (
-                    <div className="language-chips">
-                      {formData.languages.map(lang => (
-                        <span key={lang} className="language-chip">
-                          {lang}
-                          <button
-                            type="button"
-                            className="chip-remove"
-                            onClick={() => handleLanguageRemove(lang)}
-                            aria-label={`Remove ${lang}`}
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {/* Language input with autocomplete */}
-                  <div className="language-input-wrapper">
-                    <input
-                      type="text"
-                      className="language-input"
-                      placeholder="Type to search languages (e.g., Eng, Spa, Fre)..."
-                      value={languageInput}
-                      onChange={(e) => handleLanguageInputChange(e.target.value)}
-                      onFocus={() => {
-                        if (languageInput.length >= 1) {
-                          setShowLanguageSuggestions(true);
-                        }
-                      }}
-                      onBlur={() => {
-                        // Delay to allow click on suggestion
-                        setTimeout(() => setShowLanguageSuggestions(false), 200);
-                      }}
-                    />
-                    {showLanguageSuggestions && languageSuggestions.length > 0 && (
-                      <div className="language-suggestions">
-                        {languageSuggestions.map(lang => (
-                          <div
-                            key={lang}
-                            className="language-suggestion-item"
-                            onMouseDown={(e) => {
-                              e.preventDefault(); // Prevent input blur
-                              handleLanguageSelect(lang);
-                            }}
-                          >
-                            {lang}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                <div className="checkbox-group">
+                  {LANGUAGE_OPTIONS.map(lang => (
+                    <label key={lang} className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={formData.languages.includes(lang)}
+                        onChange={() => handleLanguageToggle(lang)}
+                      />
+                      <span>{lang}</span>
+                    </label>
+                  ))}
                 </div>
               </div>
 
@@ -677,36 +482,31 @@ const CompleteProfile: React.FC = () => {
 
               <div className="form-group">
                 <label>Office Hours</label>
-                <div className="office-hours-modern">
+                <div className="office-hours">
                   {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map(day => (
-                    <div key={day} className="office-hours-row-modern">
-                      <div className="day-toggle-container">
-                        <label className="toggle-switch">
-                          <input
-                            type="checkbox"
-                            checked={!formData.officeHours[day as keyof typeof formData.officeHours].closed}
-                            onChange={(e) => handleOfficeHoursChange(day, 'closed', !e.target.checked)}
-                          />
-                          <span className="toggle-slider"></span>
-                        </label>
-                        <span className="day-name">{day.charAt(0).toUpperCase() + day.slice(1)}</span>
-                      </div>
+                    <div key={day} className="office-hours-row">
+                      <label className="day-label">
+                        <input
+                          type="checkbox"
+                          checked={!formData.officeHours[day as keyof typeof formData.officeHours].closed}
+                          onChange={(e) => handleOfficeHoursChange(day, 'closed', !e.target.checked)}
+                        />
+                        <span>{day.charAt(0).toUpperCase() + day.slice(1)}</span>
+                      </label>
                       {!formData.officeHours[day as keyof typeof formData.officeHours].closed && (
-                        <div className="time-inputs">
+                        <>
                           <input
                             type="time"
-                            className="time-input"
                             value={formData.officeHours[day as keyof typeof formData.officeHours].open}
                             onChange={(e) => handleOfficeHoursChange(day, 'open', e.target.value)}
                           />
-                          <span className="time-separator">to</span>
+                          <span>to</span>
                           <input
                             type="time"
-                            className="time-input"
                             value={formData.officeHours[day as keyof typeof formData.officeHours].close}
                             onChange={(e) => handleOfficeHoursChange(day, 'close', e.target.value)}
                           />
-                        </div>
+                        </>
                       )}
                     </div>
                   ))}
@@ -715,20 +515,15 @@ const CompleteProfile: React.FC = () => {
 
               <div className="form-group">
                 <label>Insurance Accepted</label>
-                <div className="insurance-grid">
+                <div className="checkbox-group">
                   {INSURANCE_OPTIONS.map(insurance => (
-                    <label key={insurance} className="insurance-checkbox-card">
+                    <label key={insurance} className="checkbox-label">
                       <input
                         type="checkbox"
                         checked={formData.insuranceAccepted.includes(insurance)}
                         onChange={() => handleInsuranceToggle(insurance)}
                       />
-                      <div className="checkbox-card-content">
-                        <span className="checkbox-icon">
-                          {formData.insuranceAccepted.includes(insurance) ? '✓' : ''}
-                        </span>
-                        <span className="checkbox-label-text">{insurance}</span>
-                      </div>
+                      <span>{insurance}</span>
                     </label>
                   ))}
                 </div>
@@ -740,65 +535,50 @@ const CompleteProfile: React.FC = () => {
             <div className="step-section">
               <h2>Preferences & Settings</h2>
               
-              <div className="preferences-container">
-                <div className="preference-item">
-                  <div className="preference-info">
-                    <h3>Email Notifications</h3>
-                    <p>Receive notifications via email</p>
-                  </div>
-                  <label className="toggle-switch-large">
-                    <input
-                      type="checkbox"
-                      checked={formData.emailNotifications}
-                      onChange={(e) => handleChange('emailNotifications', e.target.checked)}
-                    />
-                    <span className="toggle-slider-large"></span>
-                  </label>
-                </div>
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={formData.emailNotifications}
+                    onChange={(e) => handleChange('emailNotifications', e.target.checked)}
+                  />
+                  <span>Enable Email Notifications</span>
+                </label>
+              </div>
 
-                <div className="preference-item">
-                  <div className="preference-info">
-                    <h3>SMS Notifications</h3>
-                    <p>Receive notifications via text message</p>
-                  </div>
-                  <label className="toggle-switch-large">
-                    <input
-                      type="checkbox"
-                      checked={formData.smsNotifications}
-                      onChange={(e) => handleChange('smsNotifications', e.target.checked)}
-                    />
-                    <span className="toggle-slider-large"></span>
-                  </label>
-                </div>
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={formData.smsNotifications}
+                    onChange={(e) => handleChange('smsNotifications', e.target.checked)}
+                  />
+                  <span>Enable SMS Notifications</span>
+                </label>
+              </div>
 
-                <div className="form-group">
-                  <label htmlFor="preferredContactMethod">Preferred Contact Method</label>
-                  <select
-                    id="preferredContactMethod"
-                    className="modern-select"
-                    value={formData.preferredContactMethod}
-                    onChange={(e) => handleChange('preferredContactMethod', e.target.value)}
-                  >
-                    <option value="email">Email</option>
-                    <option value="phone">Phone</option>
-                    <option value="both">Both</option>
-                  </select>
-                </div>
+              <div className="form-group">
+                <label htmlFor="preferredContactMethod">Preferred Contact Method</label>
+                <select
+                  id="preferredContactMethod"
+                  value={formData.preferredContactMethod}
+                  onChange={(e) => handleChange('preferredContactMethod', e.target.value)}
+                >
+                  <option value="email">Email</option>
+                  <option value="phone">Phone</option>
+                  <option value="both">Both</option>
+                </select>
+              </div>
 
-                <div className="preference-item">
-                  <div className="preference-info">
-                    <h3>Availability Reminders</h3>
-                    <p>Get reminders about your availability schedule</p>
-                  </div>
-                  <label className="toggle-switch-large">
-                    <input
-                      type="checkbox"
-                      checked={formData.availabilityReminders}
-                      onChange={(e) => handleChange('availabilityReminders', e.target.checked)}
-                    />
-                    <span className="toggle-slider-large"></span>
-                  </label>
-                </div>
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={formData.availabilityReminders}
+                    onChange={(e) => handleChange('availabilityReminders', e.target.checked)}
+                  />
+                  <span>Send Availability Reminders</span>
+                </label>
               </div>
             </div>
           )}
@@ -812,7 +592,7 @@ const CompleteProfile: React.FC = () => {
 
         {/* Navigation Buttons */}
         <div className="step-navigation">
-          {currentStep > startStep && (
+          {currentStep > 1 && (
             <button type="button" className="btn-secondary" onClick={handleBack} disabled={loading}>
               Back
             </button>

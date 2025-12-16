@@ -51,6 +51,12 @@ const allNavItems = [
     label: "Prescriptions", 
     roles: ["doctor", "clinic_staff", "clinic_admin"] 
   },
+  { 
+    path: "/manage-availability", 
+    icon: "⏰", 
+    label: "Manage Availability", 
+    roles: ["doctor", "clinic_admin"] 
+  },
   
   // Shared items (patients and providers)
   { 

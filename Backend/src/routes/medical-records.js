@@ -320,14 +320,38 @@ router.post('/', authenticate, canManageMedicalRecords, async (req, res) => {
       return res.status(404).json({ error: 'Patient not found' });
     }
 
+    // Get doctor_id from user_id (required for foreign key constraint)
+    let doctorId = null;
+    const DoctorRepository = require('../repositories/DoctorRepository');
+    try {
+      const doctor = await DoctorRepository.findByUserId(parseInt(req.user.userId));
+      if (doctor && doctor.doctor_id) {
+        doctorId = doctor.doctor_id;
+      } else {
+        // If user is not a doctor, check if they're clinic staff
+        // For clinic staff, we might need to handle differently or use a default doctor
+        return res.status(400).json({ 
+          error: 'User is not a doctor',
+          message: 'Only doctors can create medical records. Please ensure you are logged in as a doctor.'
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching doctor:', error);
+      return res.status(500).json({ 
+        error: 'Failed to fetch doctor information',
+        message: error.message 
+      });
+    }
+
     // Add provider information from authenticated user
-    recordData.providerId = req.user.userId;
+    recordData.providerId = doctorId; // Use doctor_id instead of userId
+    recordData.doctor_id = doctorId; // Also set doctor_id directly
     recordData.providerName = req.user.name || 'Unknown Provider';
     recordData.clinicId = req.user.clinicId || null;
     recordData.createdBy = req.user.userId;
     recordData.updatedBy = req.user.userId;
 
-    const record = createMedicalRecord(recordData);
+    const record = await createMedicalRecord(recordData);
 
     logAccess(req, AUDIT_ACTIONS.CREATE, {
       resourceType: 'MEDICAL_RECORD',
@@ -395,7 +419,7 @@ router.get('/', authenticate, canViewMedicalRecords, async (req, res) => {
       }
     }
 
-    const records = findAllMedicalRecords(filters);
+    const records = await findAllMedicalRecords(filters);
 
     logAccess(req, AUDIT_ACTIONS.VIEW, {
       resourceType: 'MEDICAL_RECORD',
@@ -417,7 +441,7 @@ router.get('/', authenticate, canViewMedicalRecords, async (req, res) => {
  */
 router.get('/:id', authenticate, canViewMedicalRecords, async (req, res) => {
   try {
-    const record = findMedicalRecordById(req.params.id);
+    const record = await findMedicalRecordById(req.params.id);
 
     if (!record) {
       return res.status(404).json({ error: 'Medical record not found' });
@@ -469,7 +493,7 @@ router.get('/patient/:patientId', authenticate, canViewMedicalRecords, async (re
       }
     }
 
-    const records = findMedicalRecordsByPatientId(patientId, options);
+    const records = await findMedicalRecordsByPatientId(patientId, options);
 
     logAccess(req, AUDIT_ACTIONS.VIEW, {
       resourceType: 'MEDICAL_RECORD',
@@ -493,7 +517,7 @@ router.get('/patient/:patientId', authenticate, canViewMedicalRecords, async (re
  */
 router.put('/:id', authenticate, canManageMedicalRecords, async (req, res) => {
   try {
-    const record = findMedicalRecordById(req.params.id);
+    const record = await findMedicalRecordById(req.params.id);
 
     if (!record) {
       return res.status(404).json({ error: 'Medical record not found' });
@@ -507,7 +531,7 @@ router.put('/:id', authenticate, canManageMedicalRecords, async (req, res) => {
     // Add updater information
     req.body.updatedBy = req.user.userId;
 
-    const updatedRecord = updateMedicalRecord(req.params.id, req.body);
+    const updatedRecord = await updateMedicalRecord(req.params.id, req.body);
 
     logAccess(req, AUDIT_ACTIONS.UPDATE, {
       resourceType: 'MEDICAL_RECORD',
@@ -603,7 +627,7 @@ router.put('/:id', authenticate, canManageMedicalRecords, async (req, res) => {
  */
 router.delete('/:id', authenticate, requireRole('clinic_admin'), async (req, res) => {
   try {
-    const record = findMedicalRecordById(req.params.id);
+    const record = await findMedicalRecordById(req.params.id);
 
     if (!record) {
       return res.status(404).json({ error: 'Medical record not found' });
@@ -614,7 +638,7 @@ router.delete('/:id', authenticate, requireRole('clinic_admin'), async (req, res
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const deleted = deleteMedicalRecord(req.params.id);
+    const deleted = await deleteMedicalRecord(req.params.id);
 
     if (!deleted) {
       return res.status(404).json({ error: 'Medical record not found' });
@@ -728,7 +752,7 @@ router.post('/:recordId/attachments', authenticate, canManageMedicalRecords, upl
       });
     }
 
-    const record = findMedicalRecordById(recordId);
+    const record = await findMedicalRecordById(recordId);
     if (!record) {
       // Delete uploaded file if record not found
       if (req.file) {
@@ -768,8 +792,12 @@ router.post('/:recordId/attachments', authenticate, canManageMedicalRecords, upl
       record.attachments = [];
     }
     record.attachments.push(attachment);
-    record.updatedAt = new Date();
-    record.updatedBy = req.user.userId;
+
+    // Save updated record to database
+    const updatedRecord = await updateMedicalRecord(recordId, {
+      attachments: record.attachments,
+      updatedBy: req.user.userId
+    });
 
     logAccess(req, AUDIT_ACTIONS.CREATE, {
       resourceType: 'SCAN_ATTACHMENT',
@@ -845,7 +873,7 @@ router.get('/:recordId/attachments', authenticate, canViewMedicalRecords, async 
   try {
     const { recordId } = req.params;
 
-    const record = findMedicalRecordById(recordId);
+    const record = await findMedicalRecordById(recordId);
     if (!record) {
       return res.status(404).json({ error: 'Medical record not found' });
     }
@@ -889,7 +917,7 @@ router.delete('/:recordId/attachments/:attachmentId', authenticate, canManageMed
   try {
     const { recordId, attachmentId } = req.params;
 
-    const record = findMedicalRecordById(recordId);
+    const record = await findMedicalRecordById(recordId);
     if (!record) {
       return res.status(404).json({ error: 'Medical record not found' });
     }
@@ -910,8 +938,12 @@ router.delete('/:recordId/attachments/:attachmentId', authenticate, canManageMed
 
     const deletedAttachment = record.attachments[attachmentIndex];
     record.attachments.splice(attachmentIndex, 1);
-    record.updatedAt = new Date();
-    record.updatedBy = req.user.userId;
+
+    // Save updated record to database
+    await updateMedicalRecord(recordId, {
+      attachments: record.attachments,
+      updatedBy: req.user.userId
+    });
 
     logAccess(req, AUDIT_ACTIONS.DELETE, {
       resourceType: 'SCAN_ATTACHMENT',
@@ -935,7 +967,7 @@ router.get('/:recordId/attachments/:attachmentId/annotations', authenticate, can
   try {
     const { recordId, attachmentId } = req.params;
 
-    const record = findMedicalRecordById(recordId);
+    const record = await findMedicalRecordById(recordId);
     if (!record) {
       return res.status(404).json({ error: 'Medical record not found' });
     }
@@ -982,7 +1014,7 @@ router.put('/:recordId/attachments/:attachmentId/annotations', authenticate, can
       return res.status(400).json({ error: 'Annotations must be an array' });
     }
 
-    const record = findMedicalRecordById(recordId);
+    const record = await findMedicalRecordById(recordId);
     if (!record) {
       return res.status(404).json({ error: 'Medical record not found' });
     }
@@ -1010,8 +1042,12 @@ router.put('/:recordId/attachments/:attachmentId/annotations', authenticate, can
     attachment.annotations = validAnnotations;
     attachment.annotationsUpdatedAt = new Date();
     attachment.annotationsUpdatedBy = req.user.userId;
-    record.updatedAt = new Date();
-    record.updatedBy = req.user.userId;
+
+    // Save updated record to database
+    await updateMedicalRecord(recordId, {
+      attachments: record.attachments,
+      updatedBy: req.user.userId
+    });
 
     logAccess(req, AUDIT_ACTIONS.UPDATE, {
       resourceType: 'SCAN_ANNOTATION',

@@ -1,99 +1,151 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import { apiUrl } from "../config/api";
 import "../pages/Account.css";
 
 type Doctor = {
   id: string;
+  doctor_id: number;
   name: string;
   specialty: string;
   location: string;
   clinic: string;
+  clinic_id?: number;
   baseFee: number;
   availableDates: string[];
+  email?: string;
+  phone?: string;
 };
-
-const mockDoctors: Doctor[] = [
-  {
-    id: "d1",
-    name: "Dr. Alice Martin",
-    specialty: "Primary Care",
-    location: "Downtown",
-    clinic: "Clinic East",
-    baseFee: 120,
-    availableDates: ["2025-10-22", "2025-10-23", "2025-10-24"],
-  },
-  {
-    id: "d2",
-    name: "Dr. Brian Patel",
-    specialty: "Cardiology",
-    location: "Midtown",
-    clinic: "Heart Center",
-    baseFee: 180,
-    availableDates: ["2025-10-22", "2025-10-24", "2025-10-25"],
-  },
-  {
-    id: "d3",
-    name: "Dr. Carol Chen",
-    specialty: "Dermatology",
-    location: "Downtown",
-    clinic: "Skin Care Clinic",
-    baseFee: 150,
-    availableDates: ["2025-10-23", "2025-10-25", "2025-10-26"],
-  },
-  {
-    id: "d4",
-    name: "Dr. David Wong",
-    specialty: "Orthopedics",
-    location: "Uptown",
-    clinic: "Joint & Bone Center",
-    baseFee: 200,
-    availableDates: ["2025-10-22", "2025-10-23", "2025-10-27"],
-  },
-  {
-    id: "d5",
-    name: "Dr. Emily Rodriguez",
-    specialty: "Pediatrics",
-    location: "Midtown",
-    clinic: "Children's Health",
-    baseFee: 130,
-    availableDates: ["2025-10-24", "2025-10-25", "2025-10-26"],
-  },
-  {
-    id: "d6",
-    name: "Dr. Frank Thompson",
-    specialty: "Cardiology",
-    location: "Downtown",
-    clinic: "Heart Center",
-    baseFee: 180,
-    availableDates: ["2025-10-23", "2025-10-24", "2025-10-26"],
-  },
-  {
-    id: "d7",
-    name: "Dr. Grace Lee",
-    specialty: "Primary Care",
-    location: "Uptown",
-    clinic: "Clinic North",
-    baseFee: 120,
-    availableDates: ["2025-10-22", "2025-10-25", "2025-10-27"],
-  },
-];
 
 const FindDoctors: React.FC = () => {
   const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const toggleSidebar = () => setSidebarCollapsed(!sidebarCollapsed);
 
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [searchSpecialty, setSearchSpecialty] = useState("");
   const [searchLocation, setSearchLocation] = useState("");
   const [searchClinic, setSearchClinic] = useState("");
   const [searchDate, setSearchDate] = useState("");
 
-  const specialties = Array.from(new Set(mockDoctors.map((d) => d.specialty)));
-  const locations = Array.from(new Set(mockDoctors.map((d) => d.location)));
-  const clinics = Array.from(new Set(mockDoctors.map((d) => d.clinic)));
+  // Fetch doctors from database
+  useEffect(() => {
+    const fetchDoctors = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        
+        const response = await fetch(apiUrl('appointments/doctors'), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
 
-  const filteredDoctors = mockDoctors.filter((doctor) => {
+        if (!response.ok) {
+          throw new Error('Failed to fetch doctors');
+        }
+
+        const data = await response.json();
+        
+        // Fetch available dates for each doctor (limit to next 14 days for performance)
+        const doctorsWithDates = await Promise.all(
+          data.doctors.map(async (doctor: any) => {
+            try {
+              // Get available dates for next 14 days (reduced from 30 for better performance)
+              const today = new Date();
+              const futureDate = new Date();
+              futureDate.setDate(today.getDate() + 14);
+              
+              const availableDates: string[] = [];
+              
+              // Check each day for availability (batch requests with Promise.all for better performance)
+              const dateChecks = [];
+              for (let d = new Date(today); d <= futureDate; d.setDate(d.getDate() + 1)) {
+                const dateStr = d.toISOString().split('T')[0];
+                dateChecks.push(
+                  fetch(
+                    `${apiUrl('appointments/available-slots')}/${doctor.doctor_id}?date=${dateStr}&duration=30`,
+                    {
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      }
+                    }
+                  ).then(async (response) => {
+                    if (response.ok) {
+                      const slotsData = await response.json();
+                      if (slotsData.slots && slotsData.slots.length > 0) {
+                        return dateStr;
+                      }
+                    }
+                    return null;
+                  }).catch(() => null)
+                );
+              }
+              
+              const results = await Promise.all(dateChecks);
+              results.forEach((dateStr) => {
+                if (dateStr) {
+                  availableDates.push(dateStr);
+                }
+              });
+              
+              return {
+                id: doctor.id || `doctor_${doctor.doctor_id}`,
+                doctor_id: doctor.doctor_id,
+                name: doctor.name || 'Unknown Doctor',
+                specialty: doctor.specialty || 'General Practice',
+                location: doctor.location || 'Location not specified',
+                clinic: doctor.clinic || 'Not specified',
+                clinic_id: doctor.clinic_id,
+                baseFee: doctor.fees || 120,
+                availableDates: availableDates,
+                email: doctor.email,
+                phone: doctor.phone
+              };
+            } catch (err) {
+              console.error(`Error fetching dates for doctor ${doctor.doctor_id}:`, err);
+              return {
+                id: doctor.id || `doctor_${doctor.doctor_id}`,
+                doctor_id: doctor.doctor_id,
+                name: doctor.name || 'Unknown Doctor',
+                specialty: doctor.specialty || 'General Practice',
+                location: doctor.location || 'Location not specified',
+                clinic: doctor.clinic || 'Not specified',
+                clinic_id: doctor.clinic_id,
+                baseFee: doctor.fees || 120,
+                availableDates: [],
+                email: doctor.email,
+                phone: doctor.phone
+              };
+            }
+          })
+        );
+
+        setDoctors(doctorsWithDates);
+      } catch (err: any) {
+        console.error('Error fetching doctors:', err);
+        setError(err.message || 'Failed to load doctors');
+        setDoctors([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDoctors();
+  }, []);
+
+  const specialties = Array.from(new Set(doctors.map((d) => d.specialty)));
+  const locations = Array.from(new Set(doctors.map((d) => d.location)));
+  const clinics = Array.from(new Set(doctors.map((d) => d.clinic)));
+
+  const filteredDoctors = doctors.filter((doctor) => {
     const matchesSpecialty =
       !searchSpecialty || doctor.specialty === searchSpecialty;
     const matchesLocation =
@@ -146,6 +198,31 @@ const FindDoctors: React.FC = () => {
               Search for doctors by specialty, location, clinic, or availability
             </p>
           </section>
+
+          {error && (
+            <section className="account-section">
+              <div
+                style={{
+                  backgroundColor: "#fed7d7",
+                  color: "#742a2a",
+                  borderRadius: "8px",
+                  padding: "0.75rem 1rem",
+                  fontSize: "0.9rem",
+                  fontWeight: 500,
+                }}
+              >
+                {error}
+              </div>
+            </section>
+          )}
+
+          {loading && (
+            <section className="account-section">
+              <div style={{ padding: "2rem", textAlign: "center", color: "#718096" }}>
+                Loading doctors...
+              </div>
+            </section>
+          )}
 
           <section className="account-section">
             <div
@@ -232,17 +309,19 @@ const FindDoctors: React.FC = () => {
             </button>
           </section>
 
-          <section className="account-section">
-            <h3 style={{ marginBottom: "1rem" }}>
-              Results ({filteredDoctors.length} doctors found)
-            </h3>
+          {!loading && (
+            <section className="account-section">
+              <h3 style={{ marginBottom: "1rem" }}>
+                Results ({filteredDoctors.length} doctors found)
+              </h3>
 
-            {filteredDoctors.length === 0 ? (
-              <p style={{ color: "#718096", fontSize: "0.95rem" }}>
-                No doctors found matching your criteria. Try adjusting your
-                filters.
-              </p>
-            ) : (
+              {filteredDoctors.length === 0 ? (
+                <p style={{ color: "#718096", fontSize: "0.95rem" }}>
+                  {doctors.length === 0 
+                    ? "No doctors available at this time."
+                    : "No doctors found matching your criteria. Try adjusting your filters."}
+                </p>
+              ) : (
               <div
                 style={{
                   display: "grid",
@@ -381,8 +460,9 @@ const FindDoctors: React.FC = () => {
                   </div>
                 ))}
               </div>
-            )}
-          </section>
+              )}
+            </section>
+          )}
         </div>
       </div>
     </div>

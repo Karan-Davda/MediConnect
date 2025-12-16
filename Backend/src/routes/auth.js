@@ -1,13 +1,13 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { authenticate } = require('../middleware/auth');
 const UserRepository = require('../repositories/UserRepository');
 const PatientRepository = require('../repositories/PatientRepository');
 const DoctorRepository = require('../repositories/DoctorRepository');
 const ClinicRepository = require('../repositories/ClinicRepository');
 const RoleRepository = require('../repositories/RoleRepository');
-const { transaction, query } = require('../db/connection');
+const { transaction } = require('../db/connection');
 const { logAccess, AUDIT_ACTIONS } = require('../middleware/auditLogger');
-const { authenticate } = require('../middleware/auth');
 const router = express.Router();
 
 // Registration endpoint
@@ -104,8 +104,7 @@ router.post('/register', async (req, res) => {
             '[]'
           ]
         );
-      } else if (role === 'doctor') {
-        // Only doctors go into doctors table
+      } else if (role === 'doctor' || role === 'clinic_admin') {
         await client.query(
           `INSERT INTO doctors (
             user_id, address, speciality_id, standard_healthcare_id,
@@ -117,17 +116,6 @@ router.post('/register', async (req, res) => {
             null, // TODO: Map specialty to speciality_id
             null,
             null,
-            null
-          ]
-        );
-      } else if (role === 'clinic_admin') {
-        // Clinic admins go into clinic_staff table
-        await client.query(
-          `INSERT INTO clinic_staff (user_id, position, address)
-           VALUES ($1, $2, $3)`,
-          [
-            user.user_id,
-            'Clinic Administrator',
             null
           ]
         );
@@ -221,15 +209,10 @@ router.post('/login', async (req, res) => {
     
     // Check if profile is complete (for doctors and clinic admins)
     let profileComplete = true;
-    if (user.role_name === 'doctor') {
+    if (user.role_name === 'doctor' || user.role_name === 'clinic_admin') {
       const doctor = await DoctorRepository.findByUserId(user.user_id);
-      // Doctors need license_number to be complete
+      // Profile is incomplete if license_number is missing
       profileComplete = doctor && doctor.license_number;
-    } else if (user.role_name === 'clinic_admin') {
-      const ClinicStaffRepository = require('../repositories/ClinicStaffRepository');
-      const staff = await ClinicStaffRepository.findByUserId(user.user_id);
-      // Clinic admins are complete if staff record exists
-      profileComplete = !!staff;
     }
 
     res.json({
@@ -263,93 +246,32 @@ router.post('/complete-profile', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'This endpoint is only for providers' });
     }
 
-    // Handle clinic_admin separately
-    if (role === 'clinic_admin') {
-      const ClinicStaffRepository = require('../repositories/ClinicStaffRepository');
-      const staff = await ClinicStaffRepository.findByUserId(userId);
-      if (!staff) {
-        return res.status(404).json({ error: 'Clinic admin profile not found' });
-      }
-
-      // Update clinic_staff record with onboarding data
-      const updates = {
-        position: onboardingData.position || 'Clinic Administrator',
-        // Add other fields as needed for clinic staff
-      };
-
-      await ClinicStaffRepository.update(staff.staff_id, updates);
-
-      logAccess(req, AUDIT_ACTIONS.UPDATE, {
-        resourceType: 'PROFILE',
-        resourceId: userId,
-        details: 'Clinic admin profile onboarding completed'
-      });
-
-      res.json({
-        message: 'Profile completed successfully',
-        profileComplete: true
-      });
-      return;
-    }
-
-    // Handle doctors
+    // Update doctor record with onboarding data
     const doctor = await DoctorRepository.findByUserId(userId);
     if (!doctor) {
       return res.status(404).json({ error: 'Doctor profile not found' });
     }
 
-    // Prepare update data for doctors table
-    const updates = {};
-    
-    // For doctors: license and certification fields
-    updates.license_number = onboardingData.licenseNumber || null;
-    updates.license_expiry = onboardingData.licenseExpiryDate ? new Date(onboardingData.licenseExpiryDate) : null;
-    updates.npi = onboardingData.npi || null;
-    updates.issuing_authority = onboardingData.issuingAuthority || null;
-    updates.board_certification = onboardingData.boardCertification || null;
+    // Prepare update data
+    const updates = {
+      license_number: onboardingData.licenseNumber,
+      license_expiry: onboardingData.licenseExpiryDate ? new Date(onboardingData.licenseExpiryDate) : null,
+    };
 
-    // Office address
+    // Update address if provided
     if (onboardingData.officeAddress) {
       const fullAddress = `${onboardingData.officeAddress}, ${onboardingData.officeCity}, ${onboardingData.officeState} ${onboardingData.officeZip}`;
       updates.address = fullAddress;
     }
 
-    // Professional Information
-    if (onboardingData.yearsOfExperience) {
-      updates.years_of_experience = parseInt(onboardingData.yearsOfExperience);
-    }
-    updates.medical_school = onboardingData.medicalSchool || null;
-    updates.residency = onboardingData.residency || null;
-    // Store JSONB fields as JSON strings (PostgreSQL will convert them)
-    if (onboardingData.languages && Array.isArray(onboardingData.languages)) {
-      updates.languages = JSON.stringify(onboardingData.languages);
-    }
-    updates.bio = onboardingData.bio || null;
-
-    // Practice Information
-    updates.office_city = onboardingData.officeCity || null;
-    updates.office_state = onboardingData.officeState || null;
-    updates.office_zip = onboardingData.officeZip || null;
-    updates.office_phone = onboardingData.officePhone || null;
-    // Store JSONB fields as JSON strings
-    if (onboardingData.officeHours) {
-      updates.office_hours = JSON.stringify(onboardingData.officeHours);
-    }
-    if (onboardingData.insuranceAccepted && Array.isArray(onboardingData.insuranceAccepted)) {
-      updates.insurance_accepted = JSON.stringify(onboardingData.insuranceAccepted);
-    }
-
-    // Preferences
-    updates.email_notifications = onboardingData.emailNotifications !== undefined ? onboardingData.emailNotifications : true;
-    updates.sms_notifications = onboardingData.smsNotifications !== undefined ? onboardingData.smsNotifications : false;
-    updates.preferred_contact_method = onboardingData.preferredContactMethod || 'email';
-    updates.availability_reminders = onboardingData.availabilityReminders !== undefined ? onboardingData.availabilityReminders : true;
-
-    // Update doctor record with all fields
+    // Update doctor record
     await DoctorRepository.update(doctor.doctor_id, updates);
 
-    // Mark profile as complete - doctors need license_number
-    const profileComplete = (updates.license_number && updates.license_number.trim() !== '');
+    // Update user record with additional info if needed
+    // (phone, etc. can be updated here if needed)
+
+    // Store additional onboarding data in a JSON column or separate table
+    // For now, we'll just mark profile as complete by having license_number
 
     // Log profile completion
     logAccess(req, AUDIT_ACTIONS.UPDATE, {
@@ -360,7 +282,56 @@ router.post('/complete-profile', authenticate, async (req, res) => {
 
     res.json({
       message: 'Profile completed successfully',
-      profileComplete: profileComplete
+      profileComplete: true
+    });
+  } catch (error) {
+    console.error('Profile completion error:', error);
+    res.status(500).json({ error: error.message || 'Failed to complete profile' });
+  }
+});
+
+// Complete profile endpoint (for doctors and clinic admins)
+router.post('/complete-profile', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const role = req.user.role;
+    const onboardingData = req.body;
+
+    if (role !== 'doctor' && role !== 'clinic_admin') {
+      return res.status(403).json({ error: 'This endpoint is only for providers' });
+    }
+
+    // Update doctor record with onboarding data
+    const doctor = await DoctorRepository.findByUserId(userId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'Doctor profile not found' });
+    }
+
+    // Prepare update data
+    const updates = {
+      license_number: onboardingData.licenseNumber,
+      license_expiry: onboardingData.licenseExpiryDate ? new Date(onboardingData.licenseExpiryDate) : null,
+    };
+
+    // Update address if provided
+    if (onboardingData.officeAddress) {
+      const fullAddress = `${onboardingData.officeAddress}, ${onboardingData.officeCity}, ${onboardingData.officeState} ${onboardingData.officeZip}`;
+      updates.address = fullAddress;
+    }
+
+    // Update doctor record
+    await DoctorRepository.update(doctor.doctor_id, updates);
+
+    // Log profile completion
+    logAccess(req, AUDIT_ACTIONS.UPDATE, {
+      resourceType: 'PROFILE',
+      resourceId: userId,
+      details: 'Profile onboarding completed'
+    });
+
+    res.json({
+      message: 'Profile completed successfully',
+      profileComplete: true
     });
   } catch (error) {
     console.error('Profile completion error:', error);
@@ -380,37 +351,86 @@ router.get('/me', async (req, res) => {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
     
+    console.log(`[DEBUG /auth/me] Decoded token - userId: ${decoded.userId}`);
+    
     const user = await UserRepository.findById(decoded.userId);
     
     if (!user) {
+      console.log(`[DEBUG /auth/me] User not found for userId: ${decoded.userId}`);
       return res.status(404).json({ error: 'User not found' });
     }
-    
-    // Check if profile is complete
-    let profileComplete = true;
-    if (user.role_name === 'doctor') {
-      const doctor = await DoctorRepository.findByUserId(user.user_id);
-      profileComplete = doctor && doctor.license_number;
-    } else if (user.role_name === 'clinic_admin') {
-      const ClinicStaffRepository = require('../repositories/ClinicStaffRepository');
-      const staff = await ClinicStaffRepository.findByUserId(user.user_id);
-      profileComplete = !!staff;
-    }
-    
-    res.json({
-      user: {
-        id: String(user.user_id),
-        email: user.email,
-        name: `${user.first_name} ${user.last_name}`.trim(),
-        first_name: user.first_name,
-        last_name: user.last_name,
-        role: user.role_name,
-        clinicId: user.clinic_id ? String(user.clinic_id) : null,
-        clinic_id: user.clinic_id,
-        profileComplete
-      }
+
+    console.log(`[DEBUG /auth/me] Found user:`, {
+      user_id: user.user_id,
+      email: user.email,
+      role: user.role_name,
+      clinic_id: user.clinic_id
     });
+
+    // Get role-specific IDs
+    let patient_id = null;
+    let doctor_id = null;
+    let clinic_staff_id = null;
+
+    if (user.role_name === 'patient') {
+      console.log(`[DEBUG /auth/me] User is a patient, fetching patient_id for user_id: ${user.user_id}`);
+      const patient = await PatientRepository.findByUserId(user.user_id);
+      if (patient) {
+        patient_id = patient.patient_id;
+        console.log(`[DEBUG /auth/me] Found patient_id: ${patient_id} for user_id: ${user.user_id}`);
+      } else {
+        console.log(`[DEBUG /auth/me] No patient record found for user_id: ${user.user_id}`);
+      }
+    } else if (user.role_name === 'doctor') {
+      console.log(`[DEBUG /auth/me] User is a doctor, fetching doctor_id for user_id: ${user.user_id}`);
+      const doctor = await DoctorRepository.findByUserId(user.user_id);
+      if (doctor) {
+        doctor_id = doctor.doctor_id;
+        console.log(`[DEBUG /auth/me] Found doctor_id: ${doctor_id} for user_id: ${user.user_id}`);
+      } else {
+        console.log(`[DEBUG /auth/me] No doctor record found for user_id: ${user.user_id}`);
+      }
+    } else if (user.role_name === 'clinic_staff' || user.role_name === 'clinic_admin') {
+      console.log(`[DEBUG /auth/me] User is clinic_staff/admin, fetching clinic_staff_id for user_id: ${user.user_id}`);
+      const ClinicStaffRepository = require('../repositories/ClinicStaffRepository');
+      const clinicStaff = await ClinicStaffRepository.findByUserId(user.user_id);
+      if (clinicStaff) {
+        clinic_staff_id = clinicStaff.clinic_staff_id;
+        console.log(`[DEBUG /auth/me] Found clinic_staff_id: ${clinic_staff_id} for user_id: ${user.user_id}`);
+      } else {
+        console.log(`[DEBUG /auth/me] No clinic_staff record found for user_id: ${user.user_id}`);
+      }
+    } else {
+      console.log(`[DEBUG /auth/me] Unknown role: ${user.role_name} for user_id: ${user.user_id}`);
+    }
+
+    const responseData = {
+      id: String(user.user_id),
+      email: user.email,
+      name: `${user.first_name} ${user.last_name}`.trim(),
+      first_name: user.first_name,
+      last_name: user.last_name,
+      role: user.role_name,
+      clinicId: user.clinic_id ? String(user.clinic_id) : null,
+      clinic_id: user.clinic_id,
+      patient_id: patient_id,
+      doctor_id: doctor_id,
+      clinic_staff_id: clinic_staff_id
+    };
+
+    console.log(`[DEBUG /auth/me] Response data:`, {
+      user_id: responseData.id,
+      role: responseData.role,
+      patient_id: responseData.patient_id,
+      doctor_id: responseData.doctor_id,
+      clinic_staff_id: responseData.clinic_staff_id,
+      clinic_id: responseData.clinic_id
+    });
+    
+    res.json(responseData);
   } catch (error) {
+    console.error('[ERROR /auth/me] Error:', error);
+    console.error('[ERROR /auth/me] Stack:', error.stack);
     res.status(401).json({ error: 'Invalid token' });
   }
 });

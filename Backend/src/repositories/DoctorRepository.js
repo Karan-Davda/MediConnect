@@ -144,9 +144,11 @@ class DoctorRepository {
       `SELECT 
         d.*,
         u.first_name, u.last_name, u.email, u.phone_number,
-        u.country, u.state, u.city
+        u.country, u.state, u.city,
+        s.speciality_name
       FROM doctors d
       JOIN users u ON d.user_id = u.user_id
+      LEFT JOIN speciality s ON d.speciality_id = s.speciality_id
       ORDER BY u.last_name, u.first_name`
     );
     return result.rows;

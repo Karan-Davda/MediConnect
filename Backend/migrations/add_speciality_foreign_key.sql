@@ -77,3 +77,5 @@ LEFT JOIN users u ON d.user_id = u.user_id
 LEFT JOIN speciality s ON d.speciality_id = s.speciality_id
 ORDER BY d.doctor_id;
 
+
+
