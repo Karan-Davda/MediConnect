@@ -51,19 +51,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (response.ok) {
           // Token is valid, restore user session
           const userData = await response.json();
-          // The /me endpoint returns user data wrapped in { user: {...} }
+          // The /me endpoint returns user data directly (not wrapped)
           const user = userData.user || userData;
           setToken(storedToken);
           setUser(user);
           // Update localStorage with fresh user data
           localStorage.setItem('user', JSON.stringify(user));
-        } else {
+        } else if (response.status === 401) {
           // Token is invalid or expired, clear storage
-          console.log('Token validation failed, clearing session');
+          console.log('Token validation failed (401), clearing session');
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           setToken(null);
           setUser(null);
+        } else {
+          // Other error (404, 500, etc.) - try to use stored data as fallback
+          console.warn('Token validation returned non-401 error, using stored data:', response.status);
+          try {
+            setToken(storedToken);
+            setUser(JSON.parse(storedUser));
+          } catch (parseError) {
+            console.error('Failed to parse stored user data:', parseError);
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            setToken(null);
+            setUser(null);
+          }
         }
       } catch (error) {
         // Network error or other issue, try to use stored data

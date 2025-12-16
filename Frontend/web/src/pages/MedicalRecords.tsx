@@ -64,6 +64,8 @@ interface MedicalRecord {
   };
   notes?: string;
   attachments?: ScanAttachment[];
+  invoiceStatus?: string | null;
+  isPaid?: boolean;
 }
 
 interface Patient {
@@ -109,9 +111,33 @@ const MedicalRecords: React.FC = () => {
   // Notification state
   const [notifyingRecordId, setNotifyingRecordId] = useState<string | null>(null);
   
+  // Bill sending state
+  const [showSendBillModal, setShowSendBillModal] = useState(false);
+  const [selectedRecordForBill, setSelectedRecordForBill] = useState<MedicalRecord | null>(null);
+  const [billData, setBillData] = useState({
+    amount: '',
+    dueDate: '',
+    description: 'Medical Services',
+    notes: ''
+  });
+  const [sendingBill, setSendingBill] = useState(false);
+  const [loadingBillAmount, setLoadingBillAmount] = useState(false);
+  
   // Form state
   const [showForm, setShowForm] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [patientAppointments, setPatientAppointments] = useState<Array<{
+    appt_id: number;
+    appointment_date: string;
+    start_time: string;
+    end_time: string;
+    doctor_name: string;
+    speciality_name: string;
+    status: string;
+    display_text: string;
+  }>>([]);
+  const [loadingAppointments, setLoadingAppointments] = useState(false);
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState<string>('');
   const [formData, setFormData] = useState({
     patientId: '',
     visitDate: new Date().toISOString().split('T')[0],
@@ -204,14 +230,84 @@ const MedicalRecords: React.FC = () => {
     }
   }, [selectedPatient]);
 
+  // Load appointments when patient is selected in form
+  const loadPatientAppointments = async (patientId: string) => {
+    if (!patientId) {
+      setPatientAppointments([]);
+      setSelectedAppointmentId('');
+      setFormData(prev => ({ ...prev, visitDate: new Date().toISOString().split('T')[0] }));
+      return;
+    }
+
+    try {
+      setLoadingAppointments(true);
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+      
+      // Extract patient_id from "patient_123" format
+      const patientIdNum = patientId.replace('patient_', '');
+      const response = await fetch(
+        `${apiUrl('appointments/patient')}/${patientIdNum}?upcomingOnly=false`,
+        {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setPatientAppointments(data.appointments || []);
+        
+        // If no appointments, reset to today's date
+        if (!data.appointments || data.appointments.length === 0) {
+          setSelectedAppointmentId('');
+          setFormData(prev => ({ ...prev, visitDate: new Date().toISOString().split('T')[0] }));
+        }
+      } else {
+        console.error('Failed to load appointments');
+        setPatientAppointments([]);
+      }
+    } catch (error) {
+      console.error('Error loading appointments:', error);
+      setPatientAppointments([]);
+    } finally {
+      setLoadingAppointments(false);
+    }
+  };
+
+  // Load appointments when patient is selected in form
+  useEffect(() => {
+    if (formData.patientId) {
+      loadPatientAppointments(formData.patientId);
+    } else {
+      setPatientAppointments([]);
+      setSelectedAppointmentId('');
+    }
+  }, [formData.patientId]);
+
+  // When appointments are loaded and we're editing, try to match appointment by date
+  useEffect(() => {
+    if (editingRecordId && patientAppointments.length > 0 && formData.visitDate) {
+      const matchingAppt = patientAppointments.find(apt => 
+        apt.appointment_date === formData.visitDate
+      );
+      if (matchingAppt && selectedAppointmentId !== matchingAppt.appt_id.toString()) {
+        setSelectedAppointmentId(matchingAppt.appt_id.toString());
+      }
+    }
+  }, [patientAppointments, editingRecordId, formData.visitDate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
 
     try {
+      // Include appointment ID if one was selected
+      const appointmentId = selectedAppointmentId ? parseInt(selectedAppointmentId) : null;
+      
       const payload = {
         ...formData,
+        appt_id: appointmentId, // Link medical record to appointment
+        appointmentId: appointmentId, // Alternative field name
         diagnoses: formData.diagnoses.filter(d => d.code && d.description),
         treatments: formData.treatments.filter(t => t.name),
         labResults: formData.labResults.filter(l => l.testName && l.result),
@@ -276,10 +372,12 @@ const MedicalRecords: React.FC = () => {
       notes: '',
       attachments: []
     });
+    setSelectedAppointmentId('');
+    setPatientAppointments([]);
     setEditingRecordId(null);
   };
 
-  const handleEdit = (record: MedicalRecord) => {
+  const handleEdit = async (record: MedicalRecord) => {
     // Parse visit date - handle both string and Date formats
     let visitDateStr = '';
     try {
@@ -294,7 +392,7 @@ const MedicalRecords: React.FC = () => {
       visitDateStr = new Date().toISOString().split('T')[0];
     }
 
-    // Populate form with record data
+    // Populate form with record data first
     setFormData({
       patientId: record.patientId,
       visitDate: visitDateStr,
@@ -313,6 +411,15 @@ const MedicalRecords: React.FC = () => {
       notes: record.notes || '',
       attachments: record.attachments || []
     });
+    
+    // Load appointments for this patient when editing
+    // The useEffect hook will handle matching the appointment by date
+    if (record.patientId) {
+      await loadPatientAppointments(record.patientId);
+    } else {
+      setSelectedAppointmentId('');
+    }
+    
     setEditingRecordId(record.id);
     setShowForm(true);
     // Scroll to form
@@ -475,6 +582,139 @@ const MedicalRecords: React.FC = () => {
       loadRecords();
     } catch (err: any) {
       setError(err.message || 'Failed to delete scan');
+    }
+  };
+
+  const handleSendBill = async (record: MedicalRecord) => {
+    setSelectedRecordForBill(record);
+    setError('');
+    setSuccess('');
+    setLoadingBillAmount(true);
+    
+    // Set default due date to 30 days from today
+    const defaultDueDate = new Date();
+    defaultDueDate.setDate(defaultDueDate.getDate() + 30);
+    
+    // Initialize with default values
+    setBillData({
+      amount: '',
+      dueDate: defaultDueDate.toISOString().split('T')[0],
+      description: 'Medical Services',
+      notes: ''
+    });
+    
+    // Fetch calculated bill amount
+    try {
+      const response = await fetch(apiUrl(`medical-records/${record.id}/bill-amount`), {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[DEBUG] Bill amount response:', data);
+        
+        // Use totalAmount if available, otherwise show empty (doctor can enter manually)
+        const calculatedAmount = data.totalAmount !== undefined && data.totalAmount !== null 
+          ? parseFloat(data.totalAmount) 
+          : 0;
+        
+        console.log('[DEBUG] Calculated amount:', calculatedAmount);
+        
+        setBillData({
+          amount: calculatedAmount > 0 ? calculatedAmount.toFixed(2) : '',
+          dueDate: defaultDueDate.toISOString().split('T')[0],
+          description: 'Medical Services',
+          notes: ''
+        });
+        
+        console.log('[DEBUG] Bill data set to:', {
+          amount: calculatedAmount > 0 ? calculatedAmount.toFixed(2) : '',
+          dueDate: defaultDueDate.toISOString().split('T')[0]
+        });
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[ERROR] Failed to fetch bill amount:', response.status, errorData);
+        // If calculation fails, still open modal with empty amount
+        setBillData({
+          amount: '',
+          dueDate: defaultDueDate.toISOString().split('T')[0],
+          description: 'Medical Services',
+          notes: ''
+        });
+      }
+    } catch (err) {
+      console.error('[ERROR] Error fetching bill amount:', err);
+      // If calculation fails, still open modal with empty amount
+      setBillData({
+        amount: '',
+        dueDate: defaultDueDate.toISOString().split('T')[0],
+        description: 'Medical Services',
+        notes: ''
+      });
+    } finally {
+      setLoadingBillAmount(false);
+      setShowSendBillModal(true);
+    }
+  };
+
+  const handleSendBillSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRecordForBill) return;
+
+    if (!billData.amount || parseFloat(billData.amount) <= 0) {
+      setError('Please enter a valid amount');
+      return;
+    }
+
+    if (!billData.dueDate) {
+      setError('Please select a due date');
+      return;
+    }
+
+    setSendingBill(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch(apiUrl('invoices'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          patientId: selectedRecordForBill.patientId,
+          medicalRecordId: selectedRecordForBill.id,
+          appointmentId: null,
+          amount: parseFloat(billData.amount),
+          dueDate: billData.dueDate,
+          description: billData.description,
+          notes: billData.notes || null
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to send bill');
+      }
+
+      const data = await response.json();
+      setSuccess(`Bill sent successfully! Invoice #${data.invoice.invoiceNumber}`);
+      setShowSendBillModal(false);
+      setSelectedRecordForBill(null);
+      setBillData({
+        amount: '',
+        dueDate: '',
+        description: 'Medical Services',
+        notes: ''
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to send bill');
+    } finally {
+      setSendingBill(false);
     }
   };
 
@@ -664,34 +904,55 @@ const MedicalRecords: React.FC = () => {
 
               <div className="form-row">
                 <div className="form-group">
-                  <label>Visit Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.visitDate}
-                    onChange={(e) => setFormData({ ...formData, visitDate: e.target.value })}
-                    onClick={(e) => {
-                      // Ensure clicking anywhere on the input opens the calendar
-                      try {
-                        if (e.currentTarget.showPicker) {
-                          e.currentTarget.showPicker();
+                  <label>Appointment Date *</label>
+                  {!formData.patientId ? (
+                    <input
+                      type="text"
+                      value="Please select a patient first"
+                      disabled
+                      style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}
+                    />
+                  ) : loadingAppointments ? (
+                    <input
+                      type="text"
+                      value="Loading appointments..."
+                      disabled
+                      style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}
+                    />
+                  ) : patientAppointments.length === 0 ? (
+                    <div>
+                      <input
+                        type="date"
+                        required
+                        value={formData.visitDate}
+                        onChange={(e) => setFormData({ ...formData, visitDate: e.target.value })}
+                        style={{ marginBottom: '8px' }}
+                      />
+                      <small style={{ color: '#666', display: 'block', marginTop: '4px' }}>
+                        No appointments found for this patient. Please select a date manually.
+                      </small>
+                    </div>
+                  ) : (
+                    <select
+                      required
+                      value={selectedAppointmentId}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        setSelectedAppointmentId(selectedId);
+                        const selectedAppt = patientAppointments.find(apt => apt.appt_id.toString() === selectedId);
+                        if (selectedAppt) {
+                          setFormData({ ...formData, visitDate: selectedAppt.appointment_date });
                         }
-                      } catch (err) {
-                        // Fallback: browser will handle it natively
-                        console.log('Calendar picker not available');
-                      }
-                    }}
-                    onFocus={(e) => {
-                      // Also open calendar on focus
-                      try {
-                        if (e.currentTarget.showPicker) {
-                          e.currentTarget.showPicker();
-                        }
-                      } catch (err) {
-                        // Fallback: browser will handle it natively
-                      }
-                    }}
-                  />
+                      }}
+                    >
+                      <option value="">Select Appointment</option>
+                      {patientAppointments.map(apt => (
+                        <option key={apt.appt_id} value={apt.appt_id}>
+                          {apt.display_text}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div className="form-group">
                   <label>Visit Type *</label>
@@ -990,8 +1251,13 @@ const MedicalRecords: React.FC = () => {
                           <button
                             className="edit-record-btn"
                             onClick={() => handleEdit(record)}
-                            title="Edit Record"
+                            title={record.isPaid ? "Cannot edit - payment completed" : "Edit Record"}
                             aria-label="Edit Record"
+                            disabled={record.isPaid}
+                            style={{
+                              opacity: record.isPaid ? 0.5 : 1,
+                              cursor: record.isPaid ? 'not-allowed' : 'pointer'
+                            }}
                           >
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -1144,6 +1410,34 @@ const MedicalRecords: React.FC = () => {
                           <p style={{ color: '#666', fontSize: '13px', margin: '8px 0' }}>No scans attached. Click "+ Add Scan" to add one.</p>
                         )}
                       </div>
+                      {canManageRecords && (
+                        <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
+                          {record.isPaid ? (
+                            <button
+                              className="send-bill-btn-large"
+                              disabled
+                              style={{
+                                backgroundColor: '#28a745',
+                                cursor: 'not-allowed',
+                                opacity: 0.8
+                              }}
+                              title="Bill Paid"
+                              aria-label="Bill Paid"
+                            >
+                              ✅ Bill Paid
+                            </button>
+                          ) : (
+                            <button
+                              className="send-bill-btn-large"
+                              onClick={() => handleSendBill(record)}
+                              title="Send Bill"
+                              aria-label="Send Bill"
+                            >
+                              💰 Send Bill
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1187,6 +1481,110 @@ const MedicalRecords: React.FC = () => {
           canDelete={canManageRecords}
           recordId={currentRecordId || undefined}
         />
+      )}
+
+      {/* Send Bill Modal */}
+      {showSendBillModal && selectedRecordForBill && (
+        <div className="modal-overlay" onClick={() => setShowSendBillModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Send Bill</h2>
+              <button 
+                className="modal-close"
+                onClick={() => {
+                  setShowSendBillModal(false);
+                  setSelectedRecordForBill(null);
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={handleSendBillSubmit}>
+              <div className="form-group">
+                <label>Patient</label>
+                <input
+                  type="text"
+                  value={selectedRecordForBill.patientId ? 
+                    patients.find(p => p.id === selectedRecordForBill.patientId)?.fullName || selectedRecordForBill.patientId 
+                    : 'Unknown'}
+                  disabled
+                />
+              </div>
+              <div className="form-group">
+                <label>Amount ($) *</label>
+                {loadingBillAmount ? (
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value=""
+                    disabled
+                    placeholder="Calculating..."
+                  />
+                ) : (
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={billData.amount}
+                    onChange={(e) => setBillData({ ...billData, amount: e.target.value })}
+                    required
+                    placeholder="0.00"
+                  />
+                )}
+              </div>
+              <div className="form-group">
+                <label>Due Date *</label>
+                <input
+                  type="date"
+                  value={billData.dueDate}
+                  onChange={(e) => setBillData({ ...billData, dueDate: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Description</label>
+                <input
+                  type="text"
+                  value={billData.description}
+                  onChange={(e) => setBillData({ ...billData, description: e.target.value })}
+                  placeholder="Medical Services"
+                />
+              </div>
+              <div className="form-group">
+                <label>Notes (Optional)</label>
+                <textarea
+                  value={billData.notes}
+                  onChange={(e) => setBillData({ ...billData, notes: e.target.value })}
+                  rows={3}
+                  placeholder="Additional notes..."
+                />
+              </div>
+              {error && <div className="alert alert-error">{error}</div>}
+              {success && <div className="alert alert-success">{success}</div>}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setShowSendBillModal(false);
+                    setSelectedRecordForBill(null);
+                  }}
+                  disabled={sendingBill}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={sendingBill}
+                >
+                  {sendingBill ? 'Sending...' : 'Send Bill'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

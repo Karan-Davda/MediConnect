@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
 import PatientAppointmentsWidget from "../widgets/PatientAppointmentsWidget";
+import PatientPrescriptionsWidget from "../widgets/PatientPrescriptionsWidget";
 import { useCalendar } from "../calendar/useCalendar";
 import NotificationIcon from '../components/NotificationIcon';
+import { apiUrl } from '../config/api';
 import './Home.css';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -16,8 +18,14 @@ const Home: React.FC = () => {
   const [cursor, setCursor] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(iso(new Date()));
   const [slot, setSlot] = useState("09:00");
-  const { isAuthenticated, user, logout, hasRole } = useAuth();
+  const { isAuthenticated, user, logout, hasRole, token } = useAuth();
   const navigate = useNavigate();
+  const [totalAppointments, setTotalAppointments] = useState<number>(0);
+  const [loadingAppointments, setLoadingAppointments] = useState(true);
+  const [upcomingAppointments, setUpcomingAppointments] = useState<any[]>([]);
+  const [loadingUpcoming, setLoadingUpcoming] = useState(true);
+  const [billDue, setBillDue] = useState<{ amount: number; dueDate: string | null }>({ amount: 0, dueDate: null });
+  const [loadingBill, setLoadingBill] = useState(true);
 
   // Redirect to onboarding if profile is incomplete (for providers)
   useEffect(() => {
@@ -27,6 +35,90 @@ const Home: React.FC = () => {
       }
     }
   }, [isAuthenticated, user, navigate]);
+
+  // Fetch appointments and bills for patients
+  useEffect(() => {
+    const fetchPatientData = async () => {
+      if (!user || !isAuthenticated || user.role !== 'patient' || !token) {
+        setLoadingAppointments(false);
+        setLoadingUpcoming(false);
+        setLoadingBill(false);
+        return;
+      }
+      
+      try {
+        // Fetch total appointments
+        const totalResponse = await fetch(apiUrl('appointments/my-appointments?upcomingOnly=false'), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (totalResponse.ok) {
+          const totalData = await totalResponse.json();
+          const allAppointments = totalData.appointments || [];
+          setTotalAppointments(allAppointments.length);
+        }
+
+        // Fetch upcoming appointments
+        const upcomingResponse = await fetch(apiUrl('appointments/my-appointments?upcomingOnly=true'), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (upcomingResponse.ok) {
+          const upcomingData = await upcomingResponse.json();
+          const upcoming = upcomingData.appointments || [];
+          // Show only the nearest (first) appointment
+          setUpcomingAppointments(upcoming.slice(0, 1));
+        }
+
+        // Fetch bills/invoices
+        const invoicesResponse = await fetch(apiUrl('invoices'), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (invoicesResponse.ok) {
+          const invoicesData = await invoicesResponse.json();
+          const invoices = invoicesData.invoices || [];
+          
+          // Calculate total due from invoices with status DUE or PARTIAL
+          const dueInvoices = invoices.filter((inv: any) => 
+            inv.status === 'DUE' || inv.status === 'PARTIAL'
+          );
+          
+          const totalDue = dueInvoices.reduce((sum: number, inv: any) => {
+            return sum + (inv.balanceDue || inv.patientResponsibility || 0);
+          }, 0);
+          
+          // Get earliest due date
+          const dueDates = dueInvoices
+            .map((inv: any) => inv.dueDate)
+            .filter((date: any) => date)
+            .sort();
+          
+          setBillDue({
+            amount: totalDue,
+            dueDate: dueDates.length > 0 ? dueDates[0] : null
+          });
+        }
+      } catch (err) {
+        console.error('Error fetching patient data:', err);
+      } finally {
+        setLoadingAppointments(false);
+        setLoadingUpcoming(false);
+        setLoadingBill(false);
+      }
+    };
+
+    fetchPatientData();
+  }, [user, isAuthenticated, token]);
 
   const toggleSidebar = () => {
     setSidebarCollapsed(!sidebarCollapsed);
@@ -613,113 +705,97 @@ const Home: React.FC = () => {
 
   // Patient Dashboard Content
   const renderPatientDashboard = () => (
-    <div className="dashboard-content">
-          {/* To Do Widget */}
-          <div className="widget todo-widget">
-            <div className="widget-header">
-              <span className="widget-icon">📝</span>
-              <h3 className="widget-title">To Do</h3>
-            </div>
-            <div className="widget-content">
-              <div className="todo-item">
-                <div className="todo-bar"></div>
-              </div>
-              <div className="todo-item">
-                <div className="todo-bar"></div>
-              </div>
-              <div className="todo-item">
-                <div className="todo-bar"></div>
-              </div>
-            </div>
+    <div className="patient-dashboard-content">
+      {/* Top Row: 3 Cards */}
+      <div className="patient-dashboard-top-row">
+        {/* Total Appointments Card */}
+        <div className="widget patient-dashboard-card">
+          <div className="widget-header">
+            <h3 className="widget-title">Total Appointments</h3>
           </div>
-
-          {/* Care Team Widget */}
-          <div className="widget care-team-widget">
-            <div className="widget-header">
-              <span className="widget-icon">👥</span>
-              <h3 className="widget-title">Your Care Team & Providers</h3>
-            </div>
-            <div className="widget-content">
-              <div className="provider-item">
-                <div className="provider-avatar">👤</div>
-                <div className="provider-info">
-                  <div className="provider-name">Name</div>
-                  <div className="provider-specialty">Specialty</div>
-                </div>
-                <div className="provider-actions">
-                  <span className="action-icon">✉️</span>
-                  <span className="action-icon">📅</span>
-                  <span className="action-icon">📊</span>
-                </div>
+          <div className="widget-content">
+            {loadingAppointments ? (
+              <div className="loading-message">Loading...</div>
+            ) : (
+              <div className="appointments-count-display">
+                <div className="count-number">{totalAppointments}</div>
               </div>
-              <div className="provider-item">
-                <div className="provider-avatar">👤</div>
-                <div className="provider-info">
-                  <div className="provider-name">Name</div>
-                  <div className="provider-specialty">Specialty</div>
-                </div>
-                <div className="provider-actions">
-                  <span className="action-icon">✉️</span>
-                  <span className="action-icon">📅</span>
-                  <span className="action-icon">📊</span>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
+        </div>
 
-          {/* Appointments Widget */}
-          <PatientAppointmentsWidget patientId="patient-123" />
-           
-          {/* Medical Records Widget */}
-          <div className="widget medical-records-widget">
-            <div className="widget-header">
-              <span className="widget-icon">📊</span>
-              <h3 className="widget-title">Medical Records</h3>
-            </div>
-            <div className="widget-content">
-              <div className="health-summary">
-                <h4>Health Summary</h4>
-                <div className="record-item">
-                  <div className="record-info">
-                    <span className="record-name">Anemia</span>
-                    <span className="record-date">As of 01/10/2010</span>
-                  </div>
-                  <div className="record-actions">
-                    <span className="info-icon">ℹ️</span>
-                    <span className="delete-icon">✕</span>
-                  </div>
-                </div>
-                <div className="record-item">
-                  <div className="record-info">
-                    <span className="record-name">Lipid Panel - Normal</span>
-                    <span className="record-date">As of 02/12/2025</span>
-                  </div>
-                  <div className="record-actions">
-                    <span className="info-icon">ℹ️</span>
-                  </div>
-                </div>
-                <div className="record-item">
-                  <div className="record-info">
-                    <span className="record-name">Glucose - Normal</span>
-                    <span className="record-date">As of 02/12/2025</span>
-                  </div>
-                  <div className="record-actions">
-                    <span className="info-icon">ℹ️</span>
-                  </div>
-                </div>
-                <div className="record-item">
-                  <div className="record-info">
-                    <span className="record-name">Thyroid - Normal</span>
-                    <span className="record-date">As of 02/12/2025</span>
-                  </div>
-                  <div className="record-actions">
-                    <span className="info-icon">ℹ️</span>
-                  </div>
-                </div>
+        {/* Upcoming Appointments Card */}
+        <div className="widget patient-dashboard-card">
+          <div className="widget-header">
+            <h3 className="widget-title">Upcoming Appointments</h3>
+          </div>
+          <div className="widget-content upcoming-appointments-content">
+            {loadingUpcoming ? (
+              <div className="loading-message">Loading...</div>
+            ) : upcomingAppointments.length === 0 ? (
+              <div className="no-data">No upcoming appointments</div>
+            ) : (
+              <div className="upcoming-appointments-list">
+                {upcomingAppointments.map((apt: any) => {
+                  const appointmentDate = new Date(apt.start_time || apt.date);
+                  return (
+                    <div key={apt.id || apt.appt_id} className="upcoming-appointment-item">
+                      <div className="appointment-date">
+                        <span className="date-label">Date:</span>
+                        <span>{appointmentDate.toLocaleDateString()}</span>
+                      </div>
+                      <div className="appointment-doctor">
+                        <span className="doctor-label">Doctor name:</span>
+                        <span>{apt.doctor_name || apt.providerName || 'Unknown'}</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+            )}
+            <div className="manage-btn-container">
+              <button 
+                className="manage-btn"
+                onClick={() => navigate('/book-appointment')}
+              >
+                Manage
+              </button>
             </div>
           </div>
         </div>
+
+        {/* Bill Due Card */}
+        <div className="widget patient-dashboard-card">
+          <div className="widget-header">
+            <h3 className="widget-title">
+              Bill Due{billDue.amount > 0 && billDue.dueDate ? ' - Date' : ''}
+            </h3>
+          </div>
+          <div className="widget-content">
+            {loadingBill ? (
+              <div className="loading-message">Loading...</div>
+            ) : (
+              <div className="bill-due-display">
+                <div className="bill-amount">${billDue.amount.toFixed(2)}</div>
+                {billDue.amount > 0 && billDue.dueDate && (
+                  <div className="bill-date">
+                    {new Date(billDue.dueDate).toLocaleDateString()}
+                  </div>
+                )}
+                {billDue.amount === 0 && (
+                  <div className="no-bill">No bills due</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Area: Prescriptions */}
+      <div className="patient-dashboard-bottom">
+        <PatientPrescriptionsWidget />
+      </div>
+    </div>
   );
 
   // Decide which dashboard to render

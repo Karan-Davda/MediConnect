@@ -5,8 +5,15 @@ class AudienceFilterService {
     this.patientRepository = patientRepository;
   }
 
-  filterPatients(targetAudience) {
-    let patients = this.patientRepository.getAll();
+  async filterPatients(targetAudience) {
+    // Handle both instance methods (old) and static methods (new)
+    let patients;
+    if (typeof this.patientRepository.getAll === 'function') {
+      patients = await this.patientRepository.getAll();
+    } else {
+      // Fallback for old in-memory repository
+      patients = this.patientRepository.getAll();
+    }
 
     if (targetAudience.ageRange) {
       patients = this.filterByAge(patients, targetAudience.ageRange);
@@ -129,13 +136,13 @@ class AudienceFilterService {
     return '';
   }
 
-  getEstimatedReach(targetAudience) {
-    const filtered = this.filterPatients(targetAudience);
+  async getEstimatedReach(targetAudience) {
+    const filtered = await this.filterPatients(targetAudience);
     return filtered.length;
   }
 
-  previewAudience(targetAudience, limit = 10) {
-    const filtered = this.filterPatients(targetAudience);
+  async previewAudience(targetAudience, limit = 10) {
+    const filtered = await this.filterPatients(targetAudience);
     return {
       count: filtered.length
     };

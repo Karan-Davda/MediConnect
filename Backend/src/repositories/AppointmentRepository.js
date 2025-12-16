@@ -541,6 +541,61 @@ class AppointmentRepository {
 
     return updatedAppt;
   }
+
+    /**
+   * Find appointments that need reminders
+   * @param {number} reminderWindowHours - Hours before appointment to send reminder
+   * @returns {Promise<Array>} Array of appointments needing reminders
+   */
+    static async findAppointmentsNeedingReminders(reminderWindowHours = 24) {
+      const now = new Date();
+      const reminderTime = new Date(now.getTime() + (reminderWindowHours * 60 * 60 * 1000));
+  
+      const result = await query(
+        `SELECT 
+          a.*,
+          p.patient_id,
+          pu.first_name || ' ' || pu.last_name AS patient_name,
+          pu.email AS patient_email,
+          d.doctor_id,
+          du.first_name || ' ' || du.last_name AS doctor_name,
+          du.email AS doctor_email
+        FROM appointments a
+        JOIN patients p ON a.patient_id = p.patient_id
+        JOIN users pu ON p.user_id = pu.user_id
+        JOIN doctors d ON a.doctor_id = d.doctor_id
+        JOIN users du ON d.user_id = du.user_id
+        WHERE a.status IN ('scheduled', 'confirmed')
+          AND a.start_time >= $1
+          AND a.start_time <= $2
+          AND (a.reminder_sent IS NULL OR a.reminder_sent = false)
+        ORDER BY a.start_time ASC`,
+        [now, reminderTime]
+      );
+  
+      return result.rows;
+    }
+  
+    /**
+     * Mark reminder as sent for an appointment
+     * @param {number} appointmentId
+     * @returns {Promise<Object>} Updated appointment
+     */
+    static async markReminderSent(appointmentId) {
+      const result = await query(
+        `UPDATE appointments 
+         SET reminder_sent = true, 
+             reminder_sent_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE appt_id = $1
+         RETURNING *`,
+        [appointmentId]
+      );
+  
+      return result.rows[0];
+    }
+
+    
 }
 
 module.exports = AppointmentRepository;

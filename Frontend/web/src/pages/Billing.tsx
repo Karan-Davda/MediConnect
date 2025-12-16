@@ -2,19 +2,37 @@ import React, { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import Sidebar from "../components/Sidebar";
+import { apiUrl } from "../config/api";
 import "./Account.css";
 
 type InvoiceStatus = "PENDING_INSURANCE" | "DUE" | "PAID" | "PARTIAL";
 
 type Invoice = {
   invoiceId: string;
+  invoiceNumber: string;
   serviceDate: string;
+  invoiceDate?: string;
+  dueDate?: string;
   serviceDesc: string;
   providerName: string;
   patientName: string;
   totalAmount: number;
+  subtotal?: number;
+  tax?: number;
+  discount?: number;
   coveragePercent: number; // from 04.04 Record Insurance
+  insurancePaid?: number;
+  patientResponsibility?: number;
+  balanceDue?: number;
   status: InvoiceStatus;
+  lineItems?: Array<{
+    service_code: string;
+    description: string;
+    quantity: number;
+    unit_price: number;
+    total: number;
+  }>;
+  notes?: string | null;
 };
 
 type PaymentStatus = "SUCCESS" | "FAILED" | "REFUNDED";
@@ -30,77 +48,132 @@ type Payment = {
   status: PaymentStatus;
 };
 
-const mockInvoices: Invoice[] = [
-  {
-    invoiceId: "INV-2025-1101-0007",
-    serviceDate: "2025-10-20",
-    serviceDesc: "Primary care follow-up visit",
-    providerName: "Dr. Alice Martin",
-    patientName: "Jane Doe",
-    totalAmount: 120.0,
-    coveragePercent: 80,
-    status: "DUE",
-  },
-  {
-    invoiceId: "INV-2025-0922-0003",
-    serviceDate: "2025-09-22",
-    serviceDesc: "Cardiology consult",
-    providerName: "Dr. Brian Patel",
-    patientName: "Jane Doe",
-    totalAmount: 320.0,
-    coveragePercent: 70,
-    status: "PAID",
-  },
-  {
-    invoiceId: "INV-2025-1110-0010",
-    serviceDate: "2025-11-10",
-    serviceDesc: "Lab work",
-    providerName: "Clinic Lab East",
-    patientName: "Jane Doe",
-    totalAmount: 85.0,
-    coveragePercent: 0, // pending insurance
-    status: "PENDING_INSURANCE",
-  },
-];
-
-// 04.03 Detail Billing – mock payment history (DP: masked methods)
-const mockPayments: Payment[] = [
-  {
-    paymentId: "PAY-2025-0922-0001",
-    invoiceId: "INV-2025-0922-0003",
-    paidOn: "2025-09-25T14:32:00Z",
-    amount: 96.0,
-    methodType: "CREDIT",
-    methodLabel: "Visa •••• 4242",
-    status: "SUCCESS",
-  },
-  {
-    paymentId: "PAY-2025-0922-0002",
-    invoiceId: "INV-2025-0922-0003",
-    paidOn: "2025-09-25T14:40:00Z",
-    amount: 10.0,
-    methodType: "HSA",
-    methodLabel: "HSA •••• 7788",
-    status: "REFUNDED",
-  },
-  {
-    paymentId: "PAY-2025-1101-0001",
-    invoiceId: "INV-2025-1101-0007",
-    paidOn: "2025-11-02T10:05:00Z",
-    amount: 24.0,
-    methodType: "DEBIT",
-    methodLabel: "Debit •••• 9931",
-    status: "FAILED",
-  },
-];
-
 const Billing: React.FC = () => {
   const { isAuthenticated, hasRole, user } = useAuth();
   const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const toggleSidebar = () => setSidebarCollapsed((s) => !s);
+
+  // Fetch invoices from backend
+  useEffect(() => {
+    const fetchInvoices = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        
+        const response = await fetch(apiUrl('invoices'), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch invoices');
+        }
+
+        const data = await response.json();
+        
+        // Check if invoices array exists
+        if (!data || !data.invoices || !Array.isArray(data.invoices)) {
+          console.error('Invalid invoice data structure:', data);
+          setError('Invalid data received from server');
+          setInvoices([]);
+          return;
+        }
+        
+        // Transform backend invoices to frontend format
+        const formattedInvoices: Invoice[] = data.invoices.map((inv: any) => {
+          // Get service description from line items
+          const serviceDesc = inv.lineItems && Array.isArray(inv.lineItems) && inv.lineItems.length > 0
+            ? inv.lineItems.map((item: any) => item.description || 'Service').join(', ')
+            : 'Medical services';
+
+          return {
+            invoiceId: String(inv.invoiceId || inv.invoice_id || ''),
+            invoiceNumber: inv.invoiceNumber || inv.invoice_number || '',
+            serviceDate: inv.serviceDate || inv.service_date || new Date().toISOString(),
+            invoiceDate: inv.invoiceDate || inv.invoice_date,
+            dueDate: inv.dueDate || inv.due_date,
+            serviceDesc: serviceDesc,
+            providerName: inv.doctorName || inv.doctor_name || 'Unknown Doctor',
+            patientName: inv.patientName || inv.patient_name || 'Unknown Patient',
+            totalAmount: parseFloat(inv.totalAmount || inv.total_amount || 0),
+            subtotal: inv.subtotal ? parseFloat(inv.subtotal) : parseFloat(inv.totalAmount || inv.total_amount || 0),
+            tax: inv.tax ? parseFloat(inv.tax) : 0,
+            discount: inv.discount ? parseFloat(inv.discount) : 0,
+            coveragePercent: inv.insuranceCoveragePercent || inv.insurance_coverage_percent || 0,
+            insurancePaid: inv.insurancePaid || inv.insurance_paid || 0,
+            patientResponsibility: inv.patientResponsibility || inv.patient_responsibility || parseFloat(inv.totalAmount || inv.total_amount || 0),
+            balanceDue: inv.balanceDue || inv.balance_due || parseFloat(inv.totalAmount || inv.total_amount || 0),
+            status: (inv.status || 'DUE') as InvoiceStatus,
+            lineItems: (inv.lineItems && Array.isArray(inv.lineItems)) ? inv.lineItems : [],
+            notes: inv.notes || null
+          };
+        });
+
+        setInvoices(formattedInvoices);
+
+        // Fetch payments for all invoices
+        const allPayments: Payment[] = [];
+        for (const invoice of formattedInvoices) {
+          try {
+            const paymentResponse = await fetch(apiUrl(`invoices/${invoice.invoiceId}`), {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (paymentResponse.ok) {
+              const paymentData = await paymentResponse.json();
+              if (paymentData.payments && paymentData.payments.length > 0) {
+                const formattedPayments = paymentData.payments.map((p: any) => ({
+                  paymentId: String(p.paymentId),
+                  invoiceId: String(p.invoiceId),
+                  paidOn: p.paymentDate,
+                  amount: p.amount,
+                  methodType: p.paymentMethod.toUpperCase() as PaymentMethodType,
+                  methodLabel: p.last4 ? `${p.paymentMethod} •••• ${p.last4}` : p.paymentMethod,
+                  status: p.status as PaymentStatus
+                }));
+                allPayments.push(...formattedPayments);
+              }
+            }
+          } catch (err) {
+            console.error(`Error fetching payments for invoice ${invoice.invoiceId}:`, err);
+          }
+        }
+        setPayments(allPayments);
+      } catch (err: any) {
+        console.error('Error fetching invoices:', err);
+        setError(err.message || 'Failed to load invoices');
+        setInvoices([]);
+        setPayments([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (isAuthenticated) {
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+      if (token) {
+        fetchInvoices();
+      } else {
+        setLoading(false);
+        setError('Authentication token not found');
+      }
+    } else {
+      setLoading(false);
+    }
+  }, [isAuthenticated]);
 
   // Role flags (ET-In / AUT)
   const isPatient = hasRole(["patient"]);
@@ -130,7 +203,7 @@ const Billing: React.FC = () => {
   };
 
   // Show loading state while checking authentication
-  if (!isAuthenticated || !canViewBilling) {
+  if (!isAuthenticated) {
     return (
       <div className="dashboard-container">
         <div className="main-content">
@@ -142,46 +215,63 @@ const Billing: React.FC = () => {
     );
   }
 
+  if (!canViewBilling) {
+    return (
+      <div className="dashboard-container">
+        <div className="main-content">
+          <div className="dashboard-content">
+            <p>You do not have permission to view this page.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Simple copay/balance calc based on coveragePercent (CL / DDD)
   const invoicesWithBalance = useMemo(() => {
-    return mockInvoices.map((inv) => {
-      const covered = inv.totalAmount * (inv.coveragePercent / 100);
-      const balance = inv.totalAmount - covered;
+    if (!invoices || !Array.isArray(invoices)) {
+      return [];
+    }
+    return invoices.map((inv) => {
+      const total = inv.totalAmount || 0;
+      const coverage = inv.coveragePercent || 0;
+      const covered = total * (coverage / 100);
+      const balance = total - covered;
       return {
         ...inv,
         covered: parseFloat(covered.toFixed(2)),
         balance: parseFloat(balance.toFixed(2)),
       };
     });
-  }, []);
+  }, [invoices]);
 
   const totalDue = useMemo(
     () =>
-      invoicesWithBalance
+      (invoicesWithBalance || [])
         .filter((i) => i.status === "DUE" || i.status === "PARTIAL")
-        .reduce((sum, i) => sum + i.balance, 0),
+        .reduce((sum, i) => sum + (i.balance || 0), 0),
     [invoicesWithBalance]
   );
 
   const numDueInvoices = useMemo(
     () =>
-      invoicesWithBalance.filter(
+      (invoicesWithBalance || []).filter(
         (i) => i.status === "DUE" || i.status === "PARTIAL"
       ).length,
     [invoicesWithBalance]
   );
 
   const numPendingInsurance = useMemo(
-    () => invoicesWithBalance.filter((i) => i.status === "PENDING_INSURANCE").length,
+    () => (invoicesWithBalance || []).filter((i) => i.status === "PENDING_INSURANCE").length,
     [invoicesWithBalance]
   );
 
   const totalCollected = useMemo(
     () =>
-      mockPayments
+      (payments || [])
         .filter((p) => p.status === "SUCCESS")
-        .reduce((sum, p) => sum + p.amount, 0),
-    []
+        .reduce((sum, p) => sum + (p.amount || 0), 0),
+    [payments]
   );
 
   // Provider name for filtering
@@ -191,10 +281,10 @@ const Billing: React.FC = () => {
   const providerInvoices = useMemo(
     () =>
       isProvider
-        ? invoicesWithBalance.filter((i) =>
+        ? (invoicesWithBalance || []).filter((i) =>
             providerName
               ? i.providerName === providerName
-              : i.providerName.toLowerCase().includes("dr.")
+              : (i.providerName || '').toLowerCase().includes("dr.")
           )
         : [],
     [isProvider, invoicesWithBalance, providerName]
@@ -236,7 +326,7 @@ const Billing: React.FC = () => {
 
   const selectedInvoice = useMemo(
     () =>
-      selectedInvoiceId
+      selectedInvoiceId && invoicesWithBalance
         ? invoicesWithBalance.find((i) => i.invoiceId === selectedInvoiceId) || null
         : null,
     [selectedInvoiceId, invoicesWithBalance]
@@ -245,10 +335,10 @@ const Billing: React.FC = () => {
   // Filter payments for selected invoice (04.03 payment history)
   const relatedPayments = useMemo(
     () =>
-      selectedInvoice
-        ? mockPayments.filter((p) => p.invoiceId === selectedInvoice.invoiceId)
+      selectedInvoice && payments
+        ? payments.filter((p) => p.invoiceId === selectedInvoice.invoiceId)
         : [],
-    [selectedInvoice]
+    [selectedInvoice, payments]
   );
 
   // === Patient billing view (full detail + history) ===
@@ -314,7 +404,16 @@ const Billing: React.FC = () => {
       <section className="account-section">
         <h2>Invoices</h2>
 
-        {invoicesWithBalance.length === 0 ? (
+        {loading ? (
+          <p style={{ marginTop: 12, color: "#4a5568" }}>Loading invoices...</p>
+        ) : error ? (
+          <div style={{ marginTop: 12, padding: 16, background: "#fee", border: "1px solid #fcc", borderRadius: 4 }}>
+            <p style={{ color: "#e53e3e", margin: 0 }}>Error: {error}</p>
+            <p style={{ color: "#666", fontSize: 12, marginTop: 8, marginBottom: 0 }}>
+              Please refresh the page or contact support if the issue persists.
+            </p>
+          </div>
+        ) : !invoicesWithBalance || invoicesWithBalance.length === 0 ? (
           <p style={{ marginTop: 12, color: "#4a5568" }}>
             You currently have no invoices.
           </p>
@@ -335,7 +434,7 @@ const Billing: React.FC = () => {
                     background: "#f7fafc",
                   }}
                 >
-                  <th style={{ padding: "8px 12px" }}>Invoice</th>
+                  <th style={{ padding: "8px 12px" }}>Invoice #</th>
                   <th style={{ padding: "8px 12px" }}>Date</th>
                   <th style={{ padding: "8px 12px" }}>Service</th>
                   <th style={{ padding: "8px 12px" }}>Provider</th>
@@ -347,7 +446,7 @@ const Billing: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {invoicesWithBalance.map((inv) => (
+                {(invoicesWithBalance || []).map((inv) => (
                   <tr
                     key={inv.invoiceId}
                     style={{
@@ -363,7 +462,7 @@ const Billing: React.FC = () => {
                     }
                   >
                     <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
-                      {inv.invoiceId}
+                      {inv.invoiceNumber || inv.invoiceId}
                     </td>
                     <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
                       {new Date(inv.serviceDate).toLocaleDateString()}
@@ -447,7 +546,7 @@ const Billing: React.FC = () => {
               }}
             >
               <h3 style={{ marginTop: 0, marginBottom: 8 }}>
-                Invoice {selectedInvoice.invoiceId}
+                Invoice {selectedInvoice.invoiceNumber || selectedInvoice.invoiceId}
               </h3>
               <p style={{ margin: "4px 0", color: "#4a5568" }}>
                 <strong>Service:</strong> {selectedInvoice.serviceDesc}
@@ -459,6 +558,45 @@ const Billing: React.FC = () => {
                 <strong>Date of service:</strong>{" "}
                 {new Date(selectedInvoice.serviceDate).toLocaleDateString()}
               </p>
+              {selectedInvoice.invoiceDate && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Invoice date:</strong>{" "}
+                  {new Date(selectedInvoice.invoiceDate).toLocaleDateString()}
+                </p>
+              )}
+              {selectedInvoice.dueDate && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Due date:</strong>{" "}
+                  {new Date(selectedInvoice.dueDate).toLocaleDateString()}
+                </p>
+              )}
+              {selectedInvoice.lineItems && selectedInvoice.lineItems.length > 0 && (
+                <div style={{ margin: "8px 0" }}>
+                  <strong style={{ color: "#4a5568" }}>Line items:</strong>
+                  <ul style={{ margin: "4px 0", paddingLeft: "20px", color: "#4a5568" }}>
+                    {selectedInvoice.lineItems.map((item: any, idx: number) => (
+                      <li key={idx}>
+                        {item.description} - Qty: {item.quantity} × ${item.unit_price?.toFixed(2) || '0.00'} = ${item.total?.toFixed(2) || '0.00'}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {selectedInvoice.subtotal !== undefined && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Subtotal:</strong> ${selectedInvoice.subtotal.toFixed(2)}
+                </p>
+              )}
+              {selectedInvoice.tax !== undefined && selectedInvoice.tax > 0 && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Tax:</strong> ${selectedInvoice.tax.toFixed(2)}
+                </p>
+              )}
+              {selectedInvoice.discount !== undefined && selectedInvoice.discount > 0 && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Discount:</strong> ${selectedInvoice.discount.toFixed(2)}
+                </p>
+              )}
               <p style={{ margin: "4px 0", color: "#4a5568" }}>
                 <strong>Total charge:</strong> $
                 {selectedInvoice.totalAmount.toFixed(2)}
@@ -468,13 +606,28 @@ const Billing: React.FC = () => {
                 {selectedInvoice.coveragePercent}% ($
                 {selectedInvoice.covered.toFixed(2)})
               </p>
+              {selectedInvoice.insurancePaid !== undefined && selectedInvoice.insurancePaid > 0 && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Insurance paid:</strong> ${selectedInvoice.insurancePaid.toFixed(2)}
+                </p>
+              )}
               <p style={{ margin: "4px 0", color: "#4a5568" }}>
                 <strong>Patient responsibility:</strong> $
                 {selectedInvoice.balance.toFixed(2)}
               </p>
+              {selectedInvoice.balanceDue !== undefined && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Balance due:</strong> ${selectedInvoice.balanceDue.toFixed(2)}
+                </p>
+              )}
               <p style={{ margin: "4px 0", color: "#4a5568" }}>
                 <strong>Status:</strong> {statusLabel(selectedInvoice.status)}
               </p>
+              {selectedInvoice.notes && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Notes:</strong> {selectedInvoice.notes}
+                </p>
+              )}
             </div>
 
             {/* Payment history for this invoice – patients CAN see card info (masked) */}
@@ -510,7 +663,7 @@ const Billing: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {relatedPayments.map((p) => (
+                      {(relatedPayments || []).map((p) => (
                         <tr
                           key={p.paymentId}
                           style={{ borderBottom: "1px solid #edf2f7" }}
@@ -680,9 +833,8 @@ const Billing: React.FC = () => {
               >
                 <th style={{ padding: "8px 12px" }}>Invoice</th>
                 <th style={{ padding: "8px 12px" }}>Date</th>
-                <th style={{ padding: "8px 12px" }}>Patient</th>
-                <th style={{ padding: "8px 12px" }}>Provider</th>
-                <th style={{ padding: "8px 12px" }}>Service</th>
+                  <th style={{ padding: "8px 12px" }}>Provider</th>
+                  <th style={{ padding: "8px 12px" }}>Service</th>
                 <th style={{ padding: "8px 12px" }}>Total</th>
                 <th style={{ padding: "8px 12px" }}>Coverage</th>
                 <th style={{ padding: "8px 12px" }}>Balance</th>
@@ -706,12 +858,11 @@ const Billing: React.FC = () => {
                   }
                 >
                   <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
-                    {inv.invoiceId}
+                    {inv.invoiceNumber || inv.invoiceId}
                   </td>
                   <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
                     {new Date(inv.serviceDate).toLocaleDateString()}
                   </td>
-                  <td style={{ padding: "8px 12px" }}>{inv.patientName}</td>
                   <td style={{ padding: "8px 12px" }}>{inv.providerName}</td>
                   <td style={{ padding: "8px 12px" }}>{inv.serviceDesc}</td>
                   <td style={{ padding: "8px 12px" }}>
@@ -781,11 +932,8 @@ const Billing: React.FC = () => {
               }}
             >
               <h3 style={{ marginTop: 0, marginBottom: 8 }}>
-                Invoice {selectedInvoice.invoiceId}
+                Invoice {selectedInvoice.invoiceNumber || selectedInvoice.invoiceId}
               </h3>
-              <p style={{ margin: "4px 0", color: "#4a5568" }}>
-                <strong>Patient:</strong> {selectedInvoice.patientName}
-              </p>
               <p style={{ margin: "4px 0", color: "#4a5568" }}>
                 <strong>Service:</strong> {selectedInvoice.serviceDesc}
               </p>
@@ -796,6 +944,45 @@ const Billing: React.FC = () => {
                 <strong>Date of service:</strong>{" "}
                 {new Date(selectedInvoice.serviceDate).toLocaleDateString()}
               </p>
+              {selectedInvoice.invoiceDate && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Invoice date:</strong>{" "}
+                  {new Date(selectedInvoice.invoiceDate).toLocaleDateString()}
+                </p>
+              )}
+              {selectedInvoice.dueDate && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Due date:</strong>{" "}
+                  {new Date(selectedInvoice.dueDate).toLocaleDateString()}
+                </p>
+              )}
+              {selectedInvoice.lineItems && selectedInvoice.lineItems.length > 0 && (
+                <div style={{ margin: "8px 0" }}>
+                  <strong style={{ color: "#4a5568" }}>Line items:</strong>
+                  <ul style={{ margin: "4px 0", paddingLeft: "20px", color: "#4a5568" }}>
+                    {selectedInvoice.lineItems.map((item: any, idx: number) => (
+                      <li key={idx}>
+                        {item.description} - Qty: {item.quantity} × ${item.unit_price?.toFixed(2) || '0.00'} = ${item.total?.toFixed(2) || '0.00'}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {selectedInvoice.subtotal !== undefined && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Subtotal:</strong> ${selectedInvoice.subtotal.toFixed(2)}
+                </p>
+              )}
+              {selectedInvoice.tax !== undefined && selectedInvoice.tax > 0 && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Tax:</strong> ${selectedInvoice.tax.toFixed(2)}
+                </p>
+              )}
+              {selectedInvoice.discount !== undefined && selectedInvoice.discount > 0 && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Discount:</strong> ${selectedInvoice.discount.toFixed(2)}
+                </p>
+              )}
               <p style={{ margin: "4px 0", color: "#4a5568" }}>
                 <strong>Total charge:</strong> $
                 {selectedInvoice.totalAmount.toFixed(2)}
@@ -805,13 +992,28 @@ const Billing: React.FC = () => {
                 {selectedInvoice.coveragePercent}% ($
                 {selectedInvoice.covered.toFixed(2)})
               </p>
+              {selectedInvoice.insurancePaid !== undefined && selectedInvoice.insurancePaid > 0 && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Insurance paid:</strong> ${selectedInvoice.insurancePaid.toFixed(2)}
+                </p>
+              )}
               <p style={{ margin: "4px 0", color: "#4a5568" }}>
                 <strong>Patient responsibility:</strong> $
                 {selectedInvoice.balance.toFixed(2)}
               </p>
+              {selectedInvoice.balanceDue !== undefined && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Balance due:</strong> ${selectedInvoice.balanceDue.toFixed(2)}
+                </p>
+              )}
               <p style={{ margin: "4px 0", color: "#4a5568" }}>
                 <strong>Status:</strong> {statusLabel(selectedInvoice.status)}
               </p>
+              {selectedInvoice.notes && (
+                <p style={{ margin: "4px 0", color: "#4a5568" }}>
+                  <strong>Notes:</strong> {selectedInvoice.notes}
+                </p>
+              )}
             </div>
 
             {/* Payment history – admin CAN see card info (masked) */}
@@ -846,7 +1048,7 @@ const Billing: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {relatedPayments.map((p) => (
+                      {(relatedPayments || []).map((p) => (
                         <tr
                           key={p.paymentId}
                           style={{ borderBottom: "1px solid #edf2f7" }}
@@ -1002,7 +1204,6 @@ const Billing: React.FC = () => {
                 }}
               >
                 <th style={{ padding: "8px 12px" }}>Date</th>
-                <th style={{ padding: "8px 12px" }}>Patient</th>
                 <th style={{ padding: "8px 12px" }}>Service</th>
                 <th style={{ padding: "8px 12px" }}>Total</th>
                 <th style={{ padding: "8px 12px" }}>Coverage</th>
@@ -1011,7 +1212,7 @@ const Billing: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {providerInvoices.map((inv) => (
+              {(providerInvoices || []).map((inv) => (
                 <tr
                   key={inv.invoiceId}
                   style={{
@@ -1022,7 +1223,6 @@ const Billing: React.FC = () => {
                   <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
                     {new Date(inv.serviceDate).toLocaleDateString()}
                   </td>
-                  <td style={{ padding: "8px 12px" }}>{inv.patientName}</td>
                   <td style={{ padding: "8px 12px" }}>{inv.serviceDesc}</td>
                   <td style={{ padding: "8px 12px" }}>
                     ${inv.totalAmount.toFixed(2)}

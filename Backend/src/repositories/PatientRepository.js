@@ -1,226 +1,195 @@
-const Patient = require('../models/Patient');
+const { query } = require('../db/connection');
 
 class PatientRepository {
-  constructor() {
-    this.patients = [];
-    this.patientCounter = 1;
-    this.initializeMockData();
+  /**
+   * Find patient by user_id
+   * @param {number} userId
+   * @returns {Object} Patient with user info, or null if not found
+   */
+  static async findByUserId(userId) {
+    const result = await query(
+      `SELECT 
+        p.*,
+        u.first_name, u.last_name, u.email, u.phone_number,
+        u.country, u.state, u.city
+      FROM patients p
+      JOIN users u ON p.user_id = u.user_id
+      WHERE p.user_id = $1`,
+      [userId]
+    );
+    return result.rows[0] || null;
   }
 
-  initializeMockData() {
-    this.patients = [
-      new Patient({
-        id: '1',
-        userId: 'u1',
-        firstName: 'John',
-        lastName: 'Doe',
-        dateOfBirth: '1985-03-15',
-        gender: 'Male',
-        phoneNumber: '+1234567890',
-        address: {
-          street: '123 Main St',
-          city: 'Boston',
-          state: 'MA',
-          zipCode: '02101'
-        },
-        emergencyContact: {
-          name: 'Jane Doe',
-          relationship: 'Spouse',
-          phoneNumber: '+1234567891'
-        },
-        insuranceInfo: {
-          provider: 'Blue Cross',
-          policyNumber: 'BC123456',
-          groupNumber: 'GRP001'
-        },
-        allergies: ['Penicillin'],
-        medicalHistory: [
-          { condition: 'Hypertension', diagnosedDate: '2020-01-10' }
-        ],
-        lastVisitDate: '2024-06-15',
-        createdAt: new Date('2020-01-01'),
-        updatedAt: new Date()
-      }),
-      new Patient({
-        id: '2',
-        userId: 'u2',
-        firstName: 'Sarah',
-        lastName: 'Johnson',
-        dateOfBirth: '1990-07-22',
-        gender: 'Female',
-        phoneNumber: '+1234567892',
-        address: {
-          street: '456 Oak Ave',
-          city: 'Boston',
-          state: 'MA',
-          zipCode: '02102'
-        },
-        emergencyContact: {
-          name: 'Mike Johnson',
-          relationship: 'Brother',
-          phoneNumber: '+1234567893'
-        },
-        insuranceInfo: {
-          provider: 'Aetna',
-          policyNumber: 'AET789012',
-          groupNumber: 'GRP002'
-        },
-        allergies: [],
-        medicalHistory: [
-          { condition: 'Diabetes Type 2', diagnosedDate: '2019-05-20' }
-        ],
-        lastVisitDate: '2023-11-10',
-        createdAt: new Date('2019-03-15'),
-        updatedAt: new Date()
-      }),
-      new Patient({
-        id: '3',
-        userId: 'u3',
-        firstName: 'Michael',
-        lastName: 'Chen',
-        dateOfBirth: '1975-11-08',
-        gender: 'Male',
-        phoneNumber: '+1234567894',
-        address: {
-          street: '789 Elm St',
-          city: 'Cambridge',
-          state: 'MA',
-          zipCode: '02139'
-        },
-        emergencyContact: {
-          name: 'Lisa Chen',
-          relationship: 'Wife',
-          phoneNumber: '+1234567895'
-        },
-        insuranceInfo: {
-          provider: 'UnitedHealth',
-          policyNumber: 'UH345678',
-          groupNumber: 'GRP003'
-        },
-        allergies: ['Sulfa drugs'],
-        medicalHistory: [
-          { condition: 'Asthma', diagnosedDate: '2015-08-12' }
-        ],
-        lastVisitDate: '2025-01-05',
-        createdAt: new Date('2015-06-01'),
-        updatedAt: new Date()
-      }),
-      new Patient({
-        id: '4',
-        userId: 'u4',
-        firstName: 'Emily',
-        lastName: 'Williams',
-        dateOfBirth: '1995-02-14',
-        gender: 'Female',
-        phoneNumber: '+1234567896',
-        address: {
-          street: '321 Pine Rd',
-          city: 'Somerville',
-          state: 'MA',
-          zipCode: '02143'
-        },
-        emergencyContact: {
-          name: 'Robert Williams',
-          relationship: 'Father',
-          phoneNumber: '+1234567897'
-        },
-        insuranceInfo: {
-          provider: 'Cigna',
-          policyNumber: 'CIG901234',
-          groupNumber: 'GRP004'
-        },
-        allergies: ['Latex'],
-        medicalHistory: [],
-        lastVisitDate: '2024-12-01',
-        createdAt: new Date('2022-01-10'),
-        updatedAt: new Date()
-      }),
-      new Patient({
-        id: '5',
-        userId: 'u5',
-        firstName: 'David',
-        lastName: 'Martinez',
-        dateOfBirth: '1968-09-30',
-        gender: 'Male',
-        phoneNumber: '+1234567898',
-        address: {
-          street: '555 Maple Dr',
-          city: 'Boston',
-          state: 'MA',
-          zipCode: '02115'
-        },
-        emergencyContact: {
-          name: 'Maria Martinez',
-          relationship: 'Spouse',
-          phoneNumber: '+1234567899'
-        },
-        insuranceInfo: {
-          provider: 'Blue Cross',
-          policyNumber: 'BC567890',
-          groupNumber: 'GRP005'
-        },
-        allergies: [],
-        medicalHistory: [
-          { condition: 'High Cholesterol', diagnosedDate: '2018-03-25' },
-          { condition: 'Hypertension', diagnosedDate: '2020-06-10' }
-        ],
-        lastVisitDate: '2024-03-20',
-        createdAt: new Date('2018-01-01'),
-        updatedAt: new Date()
-      })
-    ];
+  /**
+   * Find patient by patient_id
+   * @param {number} patientId
+   * @returns {Object} Patient with user info, or null if not found
+   */
+  static async findById(patientId) {
+    const result = await query(
+      `SELECT 
+        p.*,
+        u.first_name, u.last_name, u.email, u.phone_number,
+        u.country, u.state, u.city
+      FROM patients p
+      JOIN users u ON p.user_id = u.user_id
+      WHERE p.patient_id = $1`,
+      [patientId]
+    );
+    return result.rows[0] || null;
   }
 
-  getAll() {
-    return this.patients;
+  /**
+   * Get all patients (for dropdowns, etc.)
+   * @returns {Array} Array of patients with user info
+   */
+  static async getAll() {
+    const result = await query(
+      `SELECT 
+        p.*,
+        u.first_name, u.last_name, u.email, u.phone_number,
+        u.country, u.state, u.city
+      FROM patients p
+      JOIN users u ON p.user_id = u.user_id
+      ORDER BY u.last_name, u.first_name`
+    );
+    return result.rows;
   }
 
-  getById(id) {
-    return this.patients.find(p => p.id === id);
+  /**
+   * Create a new patient
+   * @param {Object} patientData - { user_id, dob, gender, address, emergency_contact, insurance_id, allergies, medical_history }
+   * @returns {Object} Created patient
+   */
+  static async create(patientData) {
+    const {
+      user_id,
+      dob,
+      gender,
+      address,
+      emergency_contact,
+      insurance_id,
+      allergies,
+      medical_history
+    } = patientData;
+
+    const result = await query(
+      `INSERT INTO patients (
+        user_id, dob, gender, address, emergency_contact,
+        insurance_id, allergies, medical_history
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *`,
+      [
+        user_id,
+        dob,
+        gender,
+        address ? JSON.stringify(address) : null,
+        emergency_contact ? JSON.stringify(emergency_contact) : null,
+        insurance_id,
+        allergies ? JSON.stringify(allergies) : '[]',
+        medical_history ? JSON.stringify(medical_history) : '[]'
+      ]
+    );
+
+    return result.rows[0];
   }
 
-  getByUserId(userId) {
-    return this.patients.find(p => p.userId === userId);
-  }
+  /**
+   * Update patient
+   * @param {number} patientId
+   * @param {Object} updates - Fields to update
+   * @returns {Object} Updated patient
+   */
+  static async update(patientId, updates) {
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+    const jsonbFields = ['address', 'emergency_contact', 'allergies', 'medical_history'];
 
-  create(patientData) {
-    const id = (this.patientCounter++).toString();
-    const patient = new Patient({ ...patientData, id });
-    this.patients.push(patient);
-    return patient;
-  }
-
-  update(id, updates) {
-    const index = this.patients.findIndex(p => p.id === id);
-    if (index === -1) return null;
-
-    this.patients[index] = new Patient({
-      ...this.patients[index],
-      ...updates,
-      id,
-      updatedAt: new Date()
-    });
-
-    return this.patients[index];
-  }
-
-  delete(id) {
-    const index = this.patients.findIndex(p => p.id === id);
-    if (index === -1) return false;
-
-    this.patients.splice(index, 1);
-    return true;
-  }
-
-  search(criteria) {
-    return this.patients.filter(patient => {
-      for (const key in criteria) {
-        if (patient[key] !== criteria[key]) {
-          return false;
+    Object.keys(updates).forEach(key => {
+      if (updates[key] !== undefined) {
+        // Handle JSONB fields
+        if (jsonbFields.includes(key) && typeof updates[key] === 'object') {
+          fields.push(`${key} = $${paramCount}::jsonb`);
+          values.push(JSON.stringify(updates[key]));
+        } else {
+          fields.push(`${key} = $${paramCount}`);
+          values.push(updates[key]);
         }
+        paramCount++;
       }
-      return true;
     });
+
+    if (fields.length === 0) {
+      return null;
+    }
+
+    fields.push(`updated_at = NOW()`);
+    values.push(patientId);
+
+    const result = await query(
+      `UPDATE patients 
+       SET ${fields.join(', ')}
+       WHERE patient_id = $${paramCount}
+       RETURNING *`,
+      values
+    );
+
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Delete patient
+   * @param {number} patientId
+   * @returns {boolean} True if deleted, false if not found
+   */
+  static async delete(patientId) {
+    const result = await query(
+      'DELETE FROM patients WHERE patient_id = $1 RETURNING patient_id',
+      [patientId]
+    );
+    return result.rows.length > 0;
+  }
+
+  /**
+   * Search patients by criteria
+   * @param {Object} criteria - Search criteria
+   * @returns {Array} Array of matching patients
+   */
+  static async search(criteria) {
+    let queryStr = `
+      SELECT 
+        p.*,
+        u.first_name, u.last_name, u.email, u.phone_number
+      FROM patients p
+      JOIN users u ON p.user_id = u.user_id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 1;
+
+    if (criteria.firstName) {
+      queryStr += ` AND u.first_name ILIKE $${paramCount}`;
+      params.push(`%${criteria.firstName}%`);
+      paramCount++;
+    }
+
+    if (criteria.lastName) {
+      queryStr += ` AND u.last_name ILIKE $${paramCount}`;
+      params.push(`%${criteria.lastName}%`);
+      paramCount++;
+    }
+
+    if (criteria.email) {
+      queryStr += ` AND u.email ILIKE $${paramCount}`;
+      params.push(`%${criteria.email}%`);
+      paramCount++;
+    }
+
+    queryStr += ` ORDER BY u.last_name, u.first_name`;
+
+    const result = await query(queryStr, params);
+    return result.rows;
   }
 }
 

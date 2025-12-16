@@ -198,20 +198,40 @@ async function sendSMSNotification(patient, labResult, medicalRecord) {
  * @param {Object} medicalRecord - MedicalRecord object
  * @returns {Notification} Created notification
  */
-function sendInAppNotification(patientId, labResult, medicalRecord) {
+async function sendInAppNotification(patientId, labResult, medicalRecord) {
   const statusText = labResult.status === 'critical' ? 'CRITICAL' : 
                     labResult.status === 'abnormal' ? 'ABNORMAL' : 'Available';
   
   const title = `New Test Result: ${labResult.testName}`;
   const message = `Your ${labResult.testName} result is ${statusText}. ${labResult.status === 'critical' ? 'Please contact your provider immediately.' : 'Please review in your medical records.'}`;
 
-  return createNotification({
+  // Get user_id from patient_id for quick lookup
+  let userId = null;
+  try {
+    const PatientRepository = require('../repositories/PatientRepository');
+    let patientIdNum = patientId;
+    if (typeof patientIdNum === 'string' && patientIdNum.startsWith('patient_')) {
+      patientIdNum = parseInt(patientIdNum.replace('patient_', ''));
+    }
+    const patient = await PatientRepository.findById(patientIdNum);
+    if (patient) {
+      userId = patient.user_id;
+    }
+  } catch (err) {
+    console.warn('Could not fetch user_id for notification:', err.message);
+  }
+
+  return await createNotification({
     patientId,
+    userId,
     type: 'test_result',
     title,
     message,
-    labResult,
-    medicalRecordId: medicalRecord.id
+    medicalRecordId: medicalRecord.id,
+    data: {
+      labResult: labResult.toJSON ? labResult.toJSON() : labResult
+    },
+    priority: labResult.status === 'critical' ? 'urgent' : (labResult.status === 'abnormal' ? 'high' : 'normal')
   });
 }
 
@@ -259,7 +279,7 @@ async function sendNotification(patient, labResult, medicalRecord, preferences =
 
   // Always send in-app notification
   try {
-    results.inApp.notification = sendInAppNotification(patient.id, labResult, medicalRecord);
+    results.inApp.notification = await sendInAppNotification(patient.id, labResult, medicalRecord);
     results.inApp.success = true;
   } catch (error) {
     results.inApp.error = error.message;
@@ -313,11 +333,412 @@ async function sendNotification(patient, labResult, medicalRecord, preferences =
   return results;
 }
 
+/**
+ * Send appointment confirmation email
+ * @param {Object} appointment - Appointment object with patient and doctor info
+ * @param {Object} patient - Patient object with email
+ * @param {Object} doctor - Doctor object with name
+ * @returns {Promise<Object>} Result of email send
+ */
+async function sendAppointmentConfirmationEmail(appointment, patient, doctor) {
+  console.log('[APPOINTMENT_EMAIL] Function called with:', {
+    appointment_id: appointment?.appt_id,
+    patient_id: patient?.patient_id,
+    doctor_id: doctor?.doctor_id
+  });
+  
+  // Check if Resend is available
+  let Resend;
+  try {
+    const resendModule = require('resend');
+    Resend = resendModule.Resend;
+    if (!Resend) {
+      throw new Error('Resend class not found in module');
+    }
+    console.log('[APPOINTMENT_EMAIL] Resend module loaded successfully');
+  } catch (error) {
+    console.error('[APPOINTMENT_EMAIL] Resend package not installed or invalid:', error.message);
+    return { success: false, error: 'Email service not installed' };
+  }
+
+  if (!process.env.RESEND_API_KEY) {
+    console.error('[APPOINTMENT_EMAIL] RESEND_API_KEY not configured, skipping email notification');
+    return { success: false, error: 'Email service not configured' };
+  }
+  
+  console.log('[APPOINTMENT_EMAIL] RESEND_API_KEY found, initializing Resend client');
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+
+  // Get patient email
+  let patientEmail = patient.email;
+  console.log('[APPOINTMENT_EMAIL] Initial patient email check:', {
+    hasEmail: !!patientEmail,
+    email: patientEmail,
+    user_id: patient.user_id
+  });
+  
+  if (!patientEmail) {
+    // Try to get from user
+    console.log('[APPOINTMENT_EMAIL] Patient email not found, fetching from UserRepository...');
+    const UserRepository = require('../repositories/UserRepository');
+    const user = await UserRepository.findById(patient.user_id);
+    if (user) {
+      patientEmail = user.email;
+      console.log('[APPOINTMENT_EMAIL] Found email from UserRepository:', patientEmail);
+    } else {
+      console.warn('[APPOINTMENT_EMAIL] User not found for user_id:', patient.user_id);
+    }
+  }
+
+  if (!patientEmail) {
+    console.error('[APPOINTMENT_EMAIL] Patient email not found for appointment confirmation');
+    console.error('[APPOINTMENT_EMAIL] Patient object:', {
+      patient_id: patient.patient_id,
+      user_id: patient.user_id,
+      hasEmail: !!patient.email
+    });
+    return { success: false, error: 'Patient email not found' };
+  }
+  
+  console.log('[APPOINTMENT_EMAIL] Using patient email:', patientEmail);
+
+  const startTime = new Date(appointment.start_time);
+  const formattedDate = startTime.toLocaleDateString('en-US', { 
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric' 
+  });
+  const formattedTime = startTime.toLocaleTimeString('en-US', { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    hour12: true 
+  });
+
+  const subject = `✅ Appointment Confirmed - ${formattedDate} at ${formattedTime}`;
+  
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #4CAF50; color: white; padding: 20px; text-align: center; }
+        .content { padding: 20px; background-color: #f9f9f9; }
+        .appointment-box { background-color: white; padding: 20px; margin: 15px 0; border-left: 4px solid #4CAF50; }
+        .info-row { margin: 10px 0; }
+        .label { font-weight: bold; color: #555; }
+        .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
+        .button { display: inline-block; padding: 12px 24px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h2>✅ Appointment Confirmed</h2>
+        </div>
+        <div class="content">
+          <p>Dear ${patient.first_name || patient.firstName || 'Patient'} ${patient.last_name || patient.lastName || ''},</p>
+          <p>Your appointment has been successfully confirmed!</p>
+          
+          <div class="appointment-box">
+            <h3>Appointment Details</h3>
+            <div class="info-row">
+              <span class="label">Date:</span> ${formattedDate}
+            </div>
+            <div class="info-row">
+              <span class="label">Time:</span> ${formattedTime}
+            </div>
+            <div class="info-row">
+              <span class="label">Provider:</span> ${doctor.first_name || ''} ${doctor.last_name || ''} ${doctor.speciality_name ? `- ${doctor.speciality_name}` : ''}
+            </div>
+            ${appointment.reason ? `
+            <div class="info-row">
+              <span class="label">Reason:</span> ${appointment.reason}
+            </div>
+            ` : ''}
+            ${appointment.appointment_type ? `
+            <div class="info-row">
+              <span class="label">Type:</span> ${appointment.appointment_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+            </div>
+            ` : ''}
+          </div>
+          
+          <p>Please arrive 10-15 minutes early for your appointment. If you need to reschedule or cancel, please log in to your MediConnect account.</p>
+          
+          <div style="text-align: center;">
+            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/dashboard" class="button">View Appointment</a>
+          </div>
+        </div>
+        <div class="footer">
+          <p>This is an automated confirmation from MediConnect.</p>
+          <p>Please do not reply to this email.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  try {
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+    console.log('📧 Sending appointment confirmation email:', {
+      from: fromEmail,
+      to: patientEmail,
+      subject: subject
+    });
+
+    const { data, error } = await resend.emails.send({
+      from: fromEmail,
+      to: [patientEmail],
+      subject: subject,
+      html: htmlContent,
+    });
+
+    if (error) {
+      console.error('❌ Resend API error:', error);
+      throw new Error(error.message || 'Failed to send email');
+    }
+
+    console.log('✅ Appointment confirmation email sent:', {
+      emailId: data?.id,
+      to: patientEmail
+    });
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('❌ Email send error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Send payment confirmation email to patient and doctor
+ */
+async function sendPaymentConfirmationEmail(invoice, payment, patient, doctor) {
+  try {
+    console.log('[PAYMENT_EMAIL] Starting email send process...');
+    console.log('[PAYMENT_EMAIL] Invoice:', { 
+      invoice_id: invoice.invoice_id || invoice.invoiceId,
+      invoice_number: invoice.invoice_number || invoice.invoiceNumber,
+      patient_id: invoice.patient_id || invoice.patientId,
+      doctor_id: invoice.doctor_id || invoice.doctorId
+    });
+    console.log('[PAYMENT_EMAIL] Payment:', payment);
+    console.log('[PAYMENT_EMAIL] Patient:', { 
+      patient_id: patient?.patient_id,
+      user_id: patient?.user_id 
+    });
+    console.log('[PAYMENT_EMAIL] Doctor:', { 
+      doctor_id: doctor?.doctor_id,
+      user_id: doctor?.user_id 
+    });
+
+    // Check if Resend is available
+    let Resend;
+    try {
+      const resendModule = require('resend');
+      // Resend v3 exports as { Resend } - use the Resend property
+      Resend = resendModule.Resend;
+      if (!Resend) {
+        throw new Error('Resend class not found in module');
+      }
+    } catch (error) {
+      console.warn('Resend package not installed or invalid:', error.message);
+      return { success: false, error: 'Email service not installed' };
+    }
+
+    if (!process.env.RESEND_API_KEY) {
+      console.error('[PAYMENT_EMAIL] RESEND_API_KEY not configured');
+      return { success: false, error: 'Email service not configured' };
+    }
+
+    const resend = new Resend(process.env.RESEND_API_KEY);
+
+    if (!process.env.RESEND_API_KEY) {
+      console.error('[PAYMENT_EMAIL] RESEND_API_KEY not configured');
+      return { success: false, error: 'Email service not configured' };
+    }
+
+    // Get patient email - patient object should have user_id
+    const { query } = require('../db/connection');
+    let patientUser;
+    
+    if (patient && patient.user_id) {
+      const userResult = await query('SELECT email, first_name, last_name FROM users WHERE user_id = $1', [patient.user_id]);
+      patientUser = userResult.rows[0];
+      console.log('[PAYMENT_EMAIL] Patient user found:', { email: patientUser?.email });
+    } else if (invoice.patient_id || invoice.patientId) {
+      // Fallback: get patient from invoice
+      const PatientRepository = require('../repositories/PatientRepository');
+      const patientId = invoice.patient_id || invoice.patientId;
+      const patientData = await PatientRepository.findById(patientId);
+      if (patientData && patientData.user_id) {
+        const userResult = await query('SELECT email, first_name, last_name FROM users WHERE user_id = $1', [patientData.user_id]);
+        patientUser = userResult.rows[0];
+        console.log('[PAYMENT_EMAIL] Patient user found via fallback:', { email: patientUser?.email });
+      }
+    }
+    
+    if (!patientUser || !patientUser.email) {
+      console.error('[PAYMENT_EMAIL] Patient email not found');
+      return { success: false, error: 'Patient email not found' };
+    }
+
+    // Get doctor email - doctor object should have user_id
+    let doctorUser;
+    
+    if (doctor && doctor.user_id) {
+      const doctorUserResult = await query('SELECT email, first_name, last_name FROM users WHERE user_id = $1', [doctor.user_id]);
+      doctorUser = doctorUserResult.rows[0];
+      console.log('[PAYMENT_EMAIL] Doctor user found:', { email: doctorUser?.email });
+    } else if (invoice.doctor_id || invoice.doctorId) {
+      // Fallback: get doctor from invoice
+      const DoctorRepository = require('../repositories/DoctorRepository');
+      const doctorId = invoice.doctor_id || invoice.doctorId;
+      const doctorData = await DoctorRepository.findById(doctorId);
+      if (doctorData && doctorData.user_id) {
+        const doctorUserResult = await query('SELECT email, first_name, last_name FROM users WHERE user_id = $1', [doctorData.user_id]);
+        doctorUser = doctorUserResult.rows[0];
+        console.log('[PAYMENT_EMAIL] Doctor user found via fallback:', { email: doctorUser?.email });
+      }
+    }
+    
+    if (!doctorUser || !doctorUser.email) {
+      console.error('[PAYMENT_EMAIL] Doctor email not found');
+      return { success: false, error: 'Doctor email not found' };
+    }
+
+    const subject = `✅ Payment Confirmed - Invoice ${invoice.invoice_number || invoice.invoiceNumber || 'N/A'}`;
+    
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #4CAF50; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background-color: #f9f9f9; }
+          .payment-box { background-color: white; padding: 20px; margin: 15px 0; border-left: 4px solid #4CAF50; }
+          .info-row { margin: 10px 0; }
+          .label { font-weight: bold; color: #555; }
+          .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h2>✅ Payment Confirmed</h2>
+          </div>
+          <div class="content">
+            <p>Dear ${patientUser.first_name || 'Patient'},</p>
+            <p>Your payment has been successfully processed!</p>
+            
+            <div class="payment-box">
+              <h3>Payment Details</h3>
+              <div class="info-row">
+                <span class="label">Invoice Number:</span> ${invoice.invoice_number || invoice.invoiceNumber || 'N/A'}
+              </div>
+              <div class="info-row">
+                <span class="label">Amount Paid:</span> $${parseFloat(payment.amount || 0).toFixed(2)}
+              </div>
+              <div class="info-row">
+                <span class="label">Payment Method:</span> ${(payment.payment_method || payment.paymentMethod || 'N/A').toUpperCase()}
+              </div>
+              <div class="info-row">
+                <span class="label">Payment Date:</span> ${new Date(payment.payment_date || payment.paymentDate || payment.created_at || new Date()).toLocaleDateString()}
+              </div>
+              <div class="info-row">
+                <span class="label">Receipt ID:</span> ${payment.receipt_id || payment.receiptId || 'N/A'}
+              </div>
+            </div>
+            
+            <p>Thank you for your payment. This email serves as your receipt.</p>
+          </div>
+          <div class="footer">
+            <p>This is an automated confirmation from MediConnect.</p>
+            <p>Please do not reply to this email.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+    
+    console.log('[PAYMENT_EMAIL] Sending emails...', {
+      from: fromEmail,
+      patientEmail: patientUser.email,
+      doctorEmail: doctorUser.email
+    });
+    
+    // Send to patient
+    let patientEmailResult;
+    try {
+      patientEmailResult = await resend.emails.send({
+        from: fromEmail,
+        to: [patientUser.email],
+        subject: subject,
+        html: htmlContent,
+      });
+      console.log('[PAYMENT_EMAIL] Patient email sent successfully:', patientEmailResult);
+    } catch (patientEmailError) {
+      console.error('[PAYMENT_EMAIL] Error sending patient email:', patientEmailError);
+      throw patientEmailError;
+    }
+
+    // Send to doctor
+    const doctorSubject = `Payment Received - Invoice ${invoice.invoice_number || invoice.invoiceNumber || 'N/A'}`;
+    const doctorHtmlContent = htmlContent
+      .replace(`Dear ${patientUser.first_name || 'Patient'},`, `Dear Dr. ${doctorUser.first_name || ''} ${doctorUser.last_name || ''},`)
+      .replace('Your payment has been', 'A payment has been received for');
+    
+    let doctorEmailResult;
+    try {
+      doctorEmailResult = await resend.emails.send({
+        from: fromEmail,
+        to: [doctorUser.email],
+        subject: doctorSubject,
+        html: doctorHtmlContent,
+      });
+      console.log('[PAYMENT_EMAIL] Doctor email sent successfully:', doctorEmailResult);
+    } catch (doctorEmailError) {
+      console.error('[PAYMENT_EMAIL] Error sending doctor email:', doctorEmailError);
+      throw doctorEmailError;
+    }
+
+    console.log('✅ Payment confirmation emails sent:', {
+      patientEmail: patientUser.email,
+      doctorEmail: doctorUser.email,
+      invoiceNumber: invoice.invoice_number || invoice.invoiceNumber || 'N/A'
+    });
+
+    return { 
+      success: true, 
+      patientEmail: patientEmailResult?.data, 
+      doctorEmail: doctorEmailResult?.data 
+    };
+  } catch (error) {
+    console.error('❌ Payment confirmation email error:', error);
+    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Error details:', {
+      message: error.message,
+      name: error.name,
+      code: error.code
+    });
+    throw error;
+  }
+}
+
 module.exports = {
   sendEmailNotification,
   sendSMSNotification,
   sendInAppNotification,
   sendNotification,
+  sendAppointmentConfirmationEmail,
+  sendPaymentConfirmationEmail,
   retryOperation
 };
 

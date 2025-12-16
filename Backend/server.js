@@ -11,6 +11,9 @@ const notificationRoutes = require('./src/routes/notifications');
 const appointmentRoutes = require('./src/routes/appointments');
 const claimsRoutes = require('./src/routes/claims');
 const campaignsRoutes = require('./src/routes/campaigns');
+const clinicServicesRoutes = require('./src/routes/clinic-services');
+const invoiceRoutes = require('./src/routes/invoices');
+const specialitiesRoutes = require('./src/routes/specialities');
 const reminderScheduler = require('./src/services/reminderScheduler');
 const { authenticate } = require('./src/middleware/auth');
 
@@ -91,6 +94,9 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/claims', claimsRoutes);
 app.use('/api/campaigns', campaignsRoutes);
+app.use('/api/clinic-services', clinicServicesRoutes);
+app.use('/api/invoices', invoiceRoutes);
+app.use('/api/specialities', specialitiesRoutes);
 
 app.get('/api/protected', authenticate, (req, res) => {
   res.json({

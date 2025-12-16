@@ -8,11 +8,7 @@ const {
   markAllAsRead,
   findNotificationById
 } = require('../repositories/NotificationRepository');
-const {
-  findPatientById,
-  findPatientByUserId,
-  findMedicalRecordById
-} = require('../repositories/MedicalRecordRepository');
+// Note: findMedicalRecordById is imported inline where needed
 const PatientRepository = require('../repositories/PatientRepository');
 const { sendNotification } = require('../services/notificationService');
 
@@ -32,8 +28,8 @@ router.get('/', authenticate, async (req, res) => {
       });
     }
 
-    // Find patient by user ID
-    const patient = findPatientByUserId(req.user.userId);
+    // Find patient by user ID from database
+    const patient = await PatientRepository.findByUserId(parseInt(req.user.userId));
     if (!patient) {
       return res.status(404).json({ error: 'Patient not found' });
     }
@@ -43,7 +39,7 @@ router.get('/', authenticate, async (req, res) => {
       limit: req.query.limit ? parseInt(req.query.limit) : undefined
     };
 
-    const notifications = findNotificationsByPatientId(patient.id, options);
+    const notifications = await findNotificationsByPatientId(`patient_${patient.patient_id}`, options);
 
     logAccess(req, AUDIT_ACTIONS.VIEW, {
       resourceType: 'NOTIFICATION',
@@ -73,13 +69,13 @@ router.get('/unread-count', authenticate, async (req, res) => {
       });
     }
 
-    // Find patient by user ID
-    const patient = findPatientByUserId(req.user.userId);
+    // Find patient by user ID from database
+    const patient = await PatientRepository.findByUserId(parseInt(req.user.userId));
     if (!patient) {
       return res.status(404).json({ error: 'Patient not found' });
     }
 
-    const count = getUnreadCount(patient.id);
+    const count = await getUnreadCount(`patient_${patient.patient_id}`);
 
     res.json({ unreadCount: count });
   } catch (error) {
@@ -101,18 +97,24 @@ router.put('/:id/read', authenticate, async (req, res) => {
       });
     }
 
-    const notification = findNotificationById(req.params.id);
+    const notification = await findNotificationById(req.params.id);
     if (!notification) {
       return res.status(404).json({ error: 'Notification not found' });
     }
 
-    // Find patient by user ID
-    const patient = findPatientByUserId(req.user.userId);
-    if (!patient || notification.patientId !== patient.id) {
+    // Find patient by user ID from database
+    const patient = await PatientRepository.findByUserId(parseInt(req.user.userId));
+    if (!patient) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    // Check if notification belongs to this patient
+    const notifPatientId = notification.patientId.replace('patient_', '');
+    if (String(patient.patient_id) !== notifPatientId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const updated = markAsRead(req.params.id);
+    const updated = await markAsRead(req.params.id);
 
     logAccess(req, AUDIT_ACTIONS.UPDATE, {
       resourceType: 'NOTIFICATION',
@@ -143,13 +145,13 @@ router.put('/read-all', authenticate, async (req, res) => {
       });
     }
 
-    // Find patient by user ID
-    const patient = findPatientByUserId(req.user.userId);
+    // Find patient by user ID from database
+    const patient = await PatientRepository.findByUserId(parseInt(req.user.userId));
     if (!patient) {
       return res.status(404).json({ error: 'Patient not found' });
     }
 
-    const count = markAllAsRead(patient.id);
+    const count = await markAllAsRead(`patient_${patient.patient_id}`);
 
     logAccess(req, AUDIT_ACTIONS.UPDATE, {
       resourceType: 'NOTIFICATION',
@@ -169,13 +171,14 @@ router.put('/read-all', authenticate, async (req, res) => {
  * POST /api/notifications/:recordId/notify
  * Manually trigger notification for a medical record (doctor/staff only)
  */
-router.post('/:recordId/notify', authenticate, requireRole('doctor', 'clinic_staff', 'clinic_admin'), async (req, res) => {
+router.post('/:recordId/notify', authenticate, requireRole(['doctor', 'clinic_staff', 'clinic_admin']), async (req, res) => {
   try {
     const { recordId } = req.params;
     const { preferences } = req.body; // Optional: override patient preferences
 
-    // Find medical record
-    const medicalRecord = findMedicalRecordById(recordId);
+    // Find medical record from database
+    const { findMedicalRecordById } = require('../repositories/MedicalRecordRepository');
+    const medicalRecord = await findMedicalRecordById(recordId);
     if (!medicalRecord) {
       return res.status(404).json({ error: 'Medical record not found' });
     }
@@ -185,25 +188,26 @@ router.post('/:recordId/notify', authenticate, requireRole('doctor', 'clinic_sta
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Find patient - check both in-memory and database
-    let patient = findPatientById(medicalRecord.patientId);
-    
-    // If not found in-memory, try database (patientId format: "patient_123")
-    if (!patient && medicalRecord.patientId && medicalRecord.patientId.startsWith('patient_')) {
+    // Find patient from database (patientId format: "patient_123")
+    if (medicalRecord.patientId && medicalRecord.patientId.startsWith('patient_')) {
       const patientIdNum = parseInt(medicalRecord.patientId.replace('patient_', ''));
       if (!isNaN(patientIdNum)) {
         try {
           const dbPatient = await PatientRepository.findById(patientIdNum);
           if (dbPatient) {
+            // Get user info for email
+            const UserRepository = require('../repositories/UserRepository');
+            const user = await UserRepository.findById(dbPatient.user_id);
+            
             // Create patient object for notification service
             const { createPatient } = require('../repositories/MedicalRecordRepository');
             patient = createPatient({
               userId: dbPatient.user_id.toString(),
-              firstName: dbPatient.first_name || '',
-              lastName: dbPatient.last_name || '',
+              firstName: user?.first_name || '',
+              lastName: user?.last_name || '',
               dateOfBirth: dbPatient.dob || null,
               gender: dbPatient.gender || null,
-              phoneNumber: dbPatient.phone_number || '',
+              phoneNumber: user?.phone_number || '',
               address: dbPatient.address ? (typeof dbPatient.address === 'string' ? JSON.parse(dbPatient.address) : dbPatient.address) : null,
               emergencyContact: dbPatient.emergency_contact ? (typeof dbPatient.emergency_contact === 'string' ? JSON.parse(dbPatient.emergency_contact) : dbPatient.emergency_contact) : null,
               insuranceInfo: null,
@@ -211,15 +215,14 @@ router.post('/:recordId/notify', authenticate, requireRole('doctor', 'clinic_sta
               medicalHistory: dbPatient.medical_history ? (typeof dbPatient.medical_history === 'string' ? JSON.parse(dbPatient.medical_history) : dbPatient.medical_history) : []
             });
             // Add email for notifications - CRITICAL for email to work
-            patient.email = dbPatient.email;
+            patient.email = user?.email || null;
             patient.id = medicalRecord.patientId; // Use the same ID format
             
             console.log('📋 Patient loaded from database for notification:', {
               patientId: patient.id,
               name: patient.fullName,
               email: patient.email,
-              userId: patient.userId,
-              dbPatientEmail: dbPatient.email
+              userId: patient.userId
             });
           }
         } catch (dbError) {

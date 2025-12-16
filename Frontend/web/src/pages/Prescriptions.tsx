@@ -112,8 +112,9 @@ const Prescriptions: React.FC = () => {
       fetchPharmacies();
     }
 
+    // Always fetch prescriptions on mount
     fetchPrescriptions();
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, token, user]);
 
   const fetchPatients = async () => {
     setLoadingPatients(true);
@@ -165,13 +166,16 @@ const Prescriptions: React.FC = () => {
     try {
       let url = 'prescriptions';
       if (patientId) {
-        url += `?patientId=${patientId}`;
+        // Ensure patientId is in the correct format for the backend
+        const formattedPatientId = patientId.startsWith('patient_') ? patientId : `patient_${patientId}`;
+        url += `?patientId=${encodeURIComponent(formattedPatientId)}`;
       } else if (user?.role === 'patient') {
-        // For patients, we need to get their patient record first
-        // For now, just use the general prescriptions endpoint which will be filtered server-side
+        // For patients, backend automatically filters to show only confirmed prescriptions (sent or filled)
         url = `prescriptions`;
       }
 
+      console.log('[PRESCRIPTIONS] Fetching from:', apiUrl(url));
+      
       const response = await fetch(apiUrl(url), {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -179,12 +183,22 @@ const Prescriptions: React.FC = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to fetch prescriptions');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to fetch prescriptions: ${response.status}`);
       }
 
       const data = await response.json();
-      setPrescriptions(data);
+      console.log('[PRESCRIPTIONS] Received data:', data);
+      
+      // Handle both array and object with array property
+      const prescriptionsArray = Array.isArray(data) ? data : (data.prescriptions || data.data || []);
+      setPrescriptions(prescriptionsArray);
+      
+      if (prescriptionsArray.length === 0) {
+        console.log('[PRESCRIPTIONS] No prescriptions found');
+      }
     } catch (err: any) {
+      console.error('[PRESCRIPTIONS] Error:', err);
       setError(err.message || 'Failed to fetch prescriptions');
     } finally {
       setLoading(false);
@@ -332,13 +346,13 @@ const Prescriptions: React.FC = () => {
   };
 
   const handleSendToPharmacy = async (prescriptionId: string) => {
-    if (!window.confirm('Send this prescription to the selected pharmacy?')) {
+    if (!window.confirm('Confirm and send this prescription to the selected pharmacy? Once confirmed, it will be visible to the patient.')) {
       return;
     }
 
     const prescription = prescriptions.find(p => p.id === prescriptionId);
     if (!prescription?.pharmacyId) {
-      setError('Please select a pharmacy before sending');
+      setError('Please select a pharmacy before confirming');
       return;
     }
 
@@ -361,7 +375,7 @@ const Prescriptions: React.FC = () => {
         throw new Error(errorData.error || 'Failed to send prescription');
       }
 
-      setSuccess('Prescription sent to pharmacy successfully');
+      setSuccess('Prescription confirmed and sent to pharmacy successfully. It is now visible to the patient.');
       fetchPrescriptions(selectedPatient);
     } catch (err: any) {
       setError(err.message || 'Failed to send prescription');
@@ -478,10 +492,10 @@ const Prescriptions: React.FC = () => {
   };
 
   return (
-    <div className="app-container">
+    <div className="dashboard-container">
       <Sidebar isCollapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
-      <div className={`main-content ${sidebarCollapsed ? 'expanded' : ''}`}>
+      <div className={`main-content ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
         <header className="header">
           <div className="header-left">
             <h1 className="brand-title">MediConnect - Prescription Management</h1>
@@ -521,7 +535,7 @@ const Prescriptions: React.FC = () => {
               {canPrescribe && (
                 <button
                   onClick={() => setShowForm(!showForm)}
-                  className="btn btn-primary"
+                  className="btn-new-prescription"
                   disabled={loading}
                 >
                   {showForm ? 'Cancel' : '+ New Prescription'}
@@ -855,21 +869,23 @@ const Prescriptions: React.FC = () => {
                           <>
                             <button
                               onClick={() => handleEdit(prescription)}
-                              className="btn btn-small btn-secondary"
+                              className="btn-action btn-edit"
                             >
                               Edit
                             </button>
-                            {prescription.pharmacyId && (
+                            {prescription.pharmacyId ? (
                               <button
                                 onClick={() => handleSendToPharmacy(prescription.id)}
-                                className="btn btn-small btn-primary"
+                                className="btn-action btn-confirm"
                               >
-                                Send to Pharmacy
+                                Confirm & Send to Pharmacy
                               </button>
+                            ) : (
+                              <span className="prescription-warning">Select a pharmacy to confirm</span>
                             )}
                             <button
                               onClick={() => handleCancel(prescription.id)}
-                              className="btn btn-small btn-danger"
+                              className="btn-action btn-cancel"
                             >
                               Cancel
                             </button>

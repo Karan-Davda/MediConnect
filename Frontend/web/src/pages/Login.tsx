@@ -95,6 +95,8 @@ const Login: React.FC = () => {
           navigate('/onboarding', { replace: true });
         } else if (loginRole === 'marketing_admin') {
           navigate('/marketing-campaigns');
+        } else if (userData.role === 'patient') {
+          navigate('/dashboard', { replace: true });
         } else {
           navigate('/home', { replace: true });
         }

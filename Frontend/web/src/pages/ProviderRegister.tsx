@@ -15,7 +15,13 @@ interface ProviderFormData {
   country: string;
   state: string;
   city: string;
-  specialty: string;
+  specialty: string; // Will store specialty ID
+}
+
+interface Specialty {
+  id: number;
+  name: string;
+  description?: string;
 }
 
 // ISO 3166-1 Countries (common subset)
@@ -78,6 +84,30 @@ const ProviderRegister: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string>('');
   const [availableStates, setAvailableStates] = useState<string[]>([]);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
+  const [loadingSpecialties, setLoadingSpecialties] = useState(false);
+
+  // Fetch specialties on component mount
+  useEffect(() => {
+    const fetchSpecialties = async () => {
+      try {
+        setLoadingSpecialties(true);
+        const response = await fetch(apiUrl('specialities'));
+        if (!response.ok) {
+          throw new Error('Failed to fetch specialties');
+        }
+        const data = await response.json();
+        setSpecialties(data.specialities || []);
+      } catch (error) {
+        console.error('Error fetching specialties:', error);
+        setErrors(prev => ({ ...prev, specialty: 'Failed to load specialties. Please refresh the page.' }));
+      } finally {
+        setLoadingSpecialties(false);
+      }
+    };
+
+    fetchSpecialties();
+  }, []);
 
   // Update available states when country changes
   useEffect(() => {
@@ -187,8 +217,8 @@ const ProviderRegister: React.FC = () => {
       newErrors.city = 'City must be 2-85 characters, contain letters, and cannot be numbers or symbols only';
     }
 
-    if (formData.role === 'doctor' && !formData.specialty.trim()) {
-      newErrors.specialty = 'Specialty is required';
+    if (formData.role === 'doctor' && !formData.specialty) {
+      newErrors.specialty = 'Please select a specialty';
     }
 
     setErrors(newErrors);
@@ -216,7 +246,8 @@ const ProviderRegister: React.FC = () => {
       if (formData.role === 'clinic_admin') {
         profile.clinic_name = formData.clinicName.trim();
       } else {
-        profile.specialty = formData.specialty.trim();
+        // Send specialty ID (backend will handle mapping)
+        profile.specialty = formData.specialty; // This is now the specialty ID
       }
 
       const payload = {
@@ -483,15 +514,26 @@ const ProviderRegister: React.FC = () => {
               {formData.role === 'doctor' && (
                 <div className="form-group">
                   <label htmlFor="specialty">Specialty</label>
-                  <input
-                    type="text"
-                    id="specialty"
-                    className={`form-input ${errors.specialty ? 'error' : ''}`}
-                    value={formData.specialty}
-                    onChange={(e) => handleChange('specialty', e.target.value)}
-                    placeholder="Cardiology"
-                    required
-                  />
+                  {loadingSpecialties ? (
+                    <div style={{ padding: '12px', color: '#718096', fontSize: '0.9rem' }}>
+                      Loading specialties...
+                    </div>
+                  ) : (
+                    <select
+                      id="specialty"
+                      className={`form-input ${errors.specialty ? 'error' : ''}`}
+                      value={formData.specialty}
+                      onChange={(e) => handleChange('specialty', e.target.value)}
+                      required
+                    >
+                      <option value="">Select a specialty</option>
+                      {specialties.map((specialty) => (
+                        <option key={specialty.id} value={specialty.id}>
+                          {specialty.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   {errors.specialty && <span className="error-message">{errors.specialty}</span>}
                 </div>
               )}

@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const prescriptionRepository = require('../repositories/PrescriptionRepository');
-const { authenticate, checkPermission } = require('../middleware/auth');
+const PrescriptionRepository = require('../repositories/PrescriptionRepository');
+const { authenticate, checkPermission, requireRole } = require('../middleware/auth');
 const { auditLogger, AUDIT_ACTIONS } = require('../middleware/auditLogger');
-const { findPatientByUserId, findPatientById } = require('../repositories/MedicalRecordRepository');
+const PatientRepository = require('../repositories/PatientRepository');
 
 // ==================== PRESCRIPTION ROUTES ====================
 
@@ -14,7 +14,7 @@ const { findPatientByUserId, findPatientById } = require('../repositories/Medica
  */
 router.post('/',
   authenticate,
-  checkPermission('write_prescriptions'),
+  requireRole('doctor'),
   auditLogger(AUDIT_ACTIONS.CREATE, 'PRESCRIPTION'),
   async (req, res) => {
     try {
@@ -49,26 +49,45 @@ router.post('/',
         });
       }
 
-      // Get patient name
-      const patient = await findPatientById(patientId);
-      const patientName = patient ? `${patient.firstName} ${patient.lastName}` : null;
+      // Get patient name from database
+      let patientName = null;
+      try {
+        let patientIdNum = patientId;
+        if (typeof patientIdNum === 'string' && patientIdNum.startsWith('patient_')) {
+          patientIdNum = parseInt(patientIdNum.replace('patient_', ''));
+        }
+        const patient = await PatientRepository.findById(patientIdNum);
+        if (patient) {
+          const user = await require('../repositories/UserRepository').findById(patient.user_id);
+          patientName = user ? `${user.first_name} ${user.last_name}` : null;
+        }
+      } catch (err) {
+        console.warn('Could not fetch patient name:', err.message);
+      }
 
       // Get pharmacy name if pharmacyId provided
       let pharmacyName = null;
       if (pharmacyId) {
-        const pharmacy = await prescriptionRepository.getPharmacyById(pharmacyId);
+        const pharmacy = await PrescriptionRepository.getPharmacyById(pharmacyId);
         if (pharmacy) {
           pharmacyName = pharmacy.name;
         }
       }
 
-      const prescription = await prescriptionRepository.createPrescription({
+      // Get doctor_id from user_id
+      const DoctorRepository = require('../repositories/DoctorRepository');
+      const doctor = await DoctorRepository.findByUserId(parseInt(req.user.userId));
+      if (!doctor) {
+        return res.status(400).json({ error: 'User is not a doctor' });
+      }
+
+      const prescription = await PrescriptionRepository.createPrescription({
         patientId,
         patientName,
         medicalRecordId,
-        providerId: req.user.userId,
+        providerId: doctor.doctor_id,
         providerName: req.user.name,
-        clinicId: req.user.clinicId,
+        clinicId: req.user.clinicId || 1,
         medicationName,
         medicationCode,
         dosage,
@@ -83,7 +102,6 @@ router.post('/',
         endDate,
         instructions,
         indication,
-        status: 'pending',
         pharmacyId,
         pharmacyName,
         notes,
@@ -93,10 +111,10 @@ router.post('/',
         createdBy: req.user.userId
       });
 
-      res.status(201).json(prescription);
+      res.status(201).json(prescription.toJSON());
     } catch (error) {
       console.error('Error creating prescription:', error);
-      res.status(500).json({ error: 'Failed to create prescription' });
+      res.status(500).json({ error: error.message || 'Failed to create prescription' });
     }
   }
 );
@@ -112,11 +130,15 @@ router.get('/',
     try {
       const { patientId, providerId, status, startDate, endDate, search } = req.query;
 
+      console.log('[PRESCRIPTIONS] GET / - Query params:', { patientId, providerId, status, startDate, endDate, search });
+      console.log('[PRESCRIPTIONS] User role:', req.user.role, 'User ID:', req.user.userId);
+
       // Check permissions
       const isStaff = ['doctor', 'clinic_staff', 'clinic_admin'].includes(req.user.role);
       const isPatient = req.user.role === 'patient';
 
       if (!isStaff && !isPatient) {
+        console.log('[PRESCRIPTIONS] Insufficient permissions for role:', req.user.role);
         return res.status(403).json({ error: 'Insufficient permissions' });
       }
 
@@ -125,28 +147,48 @@ router.get('/',
 
       // Staff: filter by their clinic
       if (isStaff) {
-        filters.clinicId = req.user.clinicId;
-        if (patientId) filters.patientId = patientId;
+        filters.clinicId = req.user.clinicId || 1;
+        if (patientId) {
+          filters.patientId = patientId;
+          console.log('[PRESCRIPTIONS] Filtering by patientId:', patientId);
+        }
         if (providerId) filters.providerId = providerId;
       } else if (isPatient) {
-        // Patients: only show their own prescriptions
-        const patientRecord = findPatientByUserId(req.user.userId);
-        if (!patientRecord) {
+        // Patients: only show their own prescriptions that are confirmed (sent or filled)
+        const patient = await PatientRepository.findByUserId(parseInt(req.user.userId));
+        if (!patient) {
+          console.log('[PRESCRIPTIONS] No patient record found for user:', req.user.userId);
           return res.json([]); // No patient record, no prescriptions
         }
-        filters.patientId = patientRecord.id;
+        filters.patientId = `patient_${patient.patient_id}`;
+        // Patients only see confirmed prescriptions (sent to pharmacy or filled)
+        // Don't show pending prescriptions to patients
+        if (!status) {
+          filters.status = ['sent', 'filled']; // Filter for confirmed prescriptions only
+        }
+        console.log('[PRESCRIPTIONS] Patient filter set to:', filters.patientId);
+        console.log('[PRESCRIPTIONS] Patient can only see confirmed prescriptions (sent/filled)');
       }
 
-      if (status) filters.status = status;
+      if (status && !Array.isArray(status)) {
+        filters.status = status;
+      }
       if (startDate) filters.startDate = startDate;
       if (endDate) filters.endDate = endDate;
       if (search) filters.search = search;
 
-      const prescriptions = await prescriptionRepository.getAllPrescriptions(filters);
+      console.log('[PRESCRIPTIONS] Filters:', filters);
 
-      res.json(prescriptions);
+      const prescriptions = await PrescriptionRepository.getAllPrescriptions(filters);
+
+      console.log('[PRESCRIPTIONS] Found', prescriptions.length, 'prescriptions');
+
+      const jsonPrescriptions = prescriptions.map(p => p.toJSON());
+      console.log('[PRESCRIPTIONS] Returning', jsonPrescriptions.length, 'prescriptions');
+
+      res.json(jsonPrescriptions);
     } catch (error) {
-      console.error('Error fetching prescriptions:', error);
+      console.error('[PRESCRIPTIONS] Error fetching prescriptions:', error);
       res.status(500).json({ error: 'Failed to fetch prescriptions' });
     }
   }
@@ -162,7 +204,7 @@ router.get('/:id',
   auditLogger(AUDIT_ACTIONS.VIEW, 'PRESCRIPTION'),
   async (req, res) => {
     try {
-      const prescription = await prescriptionRepository.getPrescriptionById(req.params.id);
+      const prescription = await PrescriptionRepository.getPrescriptionById(req.params.id);
 
       if (!prescription) {
         return res.status(404).json({ error: 'Prescription not found' });
@@ -170,17 +212,26 @@ router.get('/:id',
 
       // Check access: Staff can view their clinic's prescriptions, patients can view their own
       const isStaff = ['doctor', 'clinic_staff', 'clinic_admin'].includes(req.user.role);
-      const isOwnPrescription = prescription.patientId === req.user.userId;
+      
+      // For patients, check if prescription belongs to them
+      let isOwnPrescription = false;
+      if (req.user.role === 'patient') {
+        const patient = await PatientRepository.findByUserId(parseInt(req.user.userId));
+        if (patient) {
+          const prescPatientId = prescription.patientId.replace('patient_', '');
+          isOwnPrescription = String(patient.patient_id) === prescPatientId;
+        }
+      }
 
       if (!isStaff && !isOwnPrescription) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      if (isStaff && prescription.clinicId !== req.user.clinicId) {
+      if (isStaff && prescription.clinicId !== (req.user.clinicId || 1)) {
         return res.status(403).json({ error: 'Access denied - different clinic' });
       }
 
-      res.json(prescription);
+      res.json(prescription.toJSON());
     } catch (error) {
       console.error('Error fetching prescription:', error);
       res.status(500).json({ error: 'Failed to fetch prescription' });
@@ -204,26 +255,28 @@ router.get('/patient/:patientId',
       const isStaff = ['doctor', 'clinic_staff', 'clinic_admin'].includes(req.user.role);
 
       // For patients, check if they're accessing their own records
-      // patientId in URL is the Patient record ID, need to check if it matches their user ID
       let isOwnRecords = false;
       if (req.user.role === 'patient') {
-        const patientRecord = findPatientByUserId(req.user.userId);
-        isOwnRecords = patientRecord && patientRecord.id === patientId;
+        const patient = await PatientRepository.findByUserId(parseInt(req.user.userId));
+        if (patient) {
+          const urlPatientId = patientId.replace('patient_', '');
+          isOwnRecords = String(patient.patient_id) === urlPatientId;
+        }
       }
 
       if (!isStaff && !isOwnRecords) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const prescriptions = await prescriptionRepository.getPrescriptionsByPatient(patientId);
+      const prescriptions = await PrescriptionRepository.getPrescriptionsByPatient(patientId);
 
       // Filter by clinic for staff
       let filteredPrescriptions = prescriptions;
       if (isStaff) {
-        filteredPrescriptions = prescriptions.filter(p => p.clinicId === req.user.clinicId);
+        filteredPrescriptions = prescriptions.filter(p => p.clinicId === (req.user.clinicId || 1));
       }
 
-      res.json(filteredPrescriptions);
+      res.json(filteredPrescriptions.map(p => p.toJSON()));
     } catch (error) {
       console.error('Error fetching patient prescriptions:', error);
       res.status(500).json({ error: 'Failed to fetch patient prescriptions' });
@@ -241,14 +294,14 @@ router.get('/medical-record/:medicalRecordId',
   checkPermission('view_patient_records'),
   async (req, res) => {
     try {
-      const prescriptions = await prescriptionRepository.getPrescriptionsByMedicalRecord(
+      const prescriptions = await PrescriptionRepository.getPrescriptionsByMedicalRecord(
         req.params.medicalRecordId
       );
 
       // Filter by clinic
-      const filteredPrescriptions = prescriptions.filter(p => p.clinicId === req.user.clinicId);
+      const filteredPrescriptions = prescriptions.filter(p => p.clinicId === (req.user.clinicId || 1));
 
-      res.json(filteredPrescriptions);
+      res.json(filteredPrescriptions.map(p => p.toJSON()));
     } catch (error) {
       console.error('Error fetching medical record prescriptions:', error);
       res.status(500).json({ error: 'Failed to fetch medical record prescriptions' });
@@ -263,18 +316,18 @@ router.get('/medical-record/:medicalRecordId',
  */
 router.put('/:id',
   authenticate,
-  checkPermission('write_prescriptions'),
+  requireRole('doctor'),
   auditLogger(AUDIT_ACTIONS.UPDATE, 'PRESCRIPTION'),
   async (req, res) => {
     try {
-      const prescription = await prescriptionRepository.getPrescriptionById(req.params.id);
+      const prescription = await PrescriptionRepository.getPrescriptionById(req.params.id);
 
       if (!prescription) {
         return res.status(404).json({ error: 'Prescription not found' });
       }
 
       // Check clinic access
-      if (prescription.clinicId !== req.user.clinicId) {
+      if (prescription.clinicId !== (req.user.clinicId || 1)) {
         return res.status(403).json({ error: 'Access denied - different clinic' });
       }
 
@@ -285,23 +338,27 @@ router.put('/:id',
 
       const updates = {
         ...req.body,
-        updatedBy: req.user.userId
+        updated_by: req.user.userId
       };
 
       // Update pharmacy name if pharmacyId changed
       if (updates.pharmacyId && updates.pharmacyId !== prescription.pharmacyId) {
-        const pharmacy = await prescriptionRepository.getPharmacyById(updates.pharmacyId);
+        const pharmacy = await PrescriptionRepository.getPharmacyById(updates.pharmacyId);
         if (pharmacy) {
-          updates.pharmacyName = pharmacy.name;
+          updates.pharmacy_name = pharmacy.name;
         }
       }
 
-      const updatedPrescription = await prescriptionRepository.updatePrescription(
+      const updatedPrescription = await PrescriptionRepository.updatePrescription(
         req.params.id,
         updates
       );
 
-      res.json(updatedPrescription);
+      if (!updatedPrescription) {
+        return res.status(500).json({ error: 'Failed to update prescription' });
+      }
+
+      res.json(updatedPrescription.toJSON());
     } catch (error) {
       console.error('Error updating prescription:', error);
       res.status(500).json({ error: 'Failed to update prescription' });
@@ -331,24 +388,28 @@ router.put('/:id/status',
         return res.status(400).json({ error: 'Invalid status' });
       }
 
-      const prescription = await prescriptionRepository.getPrescriptionById(req.params.id);
+      const prescription = await PrescriptionRepository.getPrescriptionById(req.params.id);
 
       if (!prescription) {
         return res.status(404).json({ error: 'Prescription not found' });
       }
 
       // Check clinic access
-      if (prescription.clinicId !== req.user.clinicId) {
+      if (prescription.clinicId !== (req.user.clinicId || 1)) {
         return res.status(403).json({ error: 'Access denied - different clinic' });
       }
 
-      const updatedPrescription = await prescriptionRepository.updatePrescriptionStatus(
+      const updatedPrescription = await PrescriptionRepository.updatePrescriptionStatus(
         req.params.id,
         status,
         req.user.userId
       );
 
-      res.json(updatedPrescription);
+      if (!updatedPrescription) {
+        return res.status(500).json({ error: 'Failed to update prescription status' });
+      }
+
+      res.json(updatedPrescription.toJSON());
     } catch (error) {
       console.error('Error updating prescription status:', error);
       res.status(500).json({ error: 'Failed to update prescription status' });
@@ -363,7 +424,7 @@ router.put('/:id/status',
  */
 router.post('/:id/send-to-pharmacy',
   authenticate,
-  checkPermission('write_prescriptions'),
+  requireRole('doctor'),
   auditLogger(AUDIT_ACTIONS.UPDATE, 'PRESCRIPTION'),
   async (req, res) => {
     try {
@@ -373,14 +434,14 @@ router.post('/:id/send-to-pharmacy',
         return res.status(400).json({ error: 'Pharmacy ID is required' });
       }
 
-      const prescription = await prescriptionRepository.getPrescriptionById(req.params.id);
+      const prescription = await PrescriptionRepository.getPrescriptionById(req.params.id);
 
       if (!prescription) {
         return res.status(404).json({ error: 'Prescription not found' });
       }
 
       // Check clinic access
-      if (prescription.clinicId !== req.user.clinicId) {
+      if (prescription.clinicId !== (req.user.clinicId || 1)) {
         return res.status(403).json({ error: 'Access denied - different clinic' });
       }
 
@@ -389,15 +450,19 @@ router.post('/:id/send-to-pharmacy',
         return res.status(400).json({ error: 'Cannot send cancelled or expired prescriptions' });
       }
 
-      const updatedPrescription = await prescriptionRepository.sendToPharmacy(
+      const updatedPrescription = await PrescriptionRepository.sendToPharmacy(
         req.params.id,
         pharmacyId,
         req.user.userId
       );
 
+      if (!updatedPrescription) {
+        return res.status(500).json({ error: 'Failed to send prescription to pharmacy' });
+      }
+
       res.json({
         message: 'Prescription sent to pharmacy successfully',
-        prescription: updatedPrescription
+        prescription: updatedPrescription.toJSON()
       });
     } catch (error) {
       console.error('Error sending prescription to pharmacy:', error);
@@ -413,18 +478,18 @@ router.post('/:id/send-to-pharmacy',
  */
 router.delete('/:id',
   authenticate,
-  checkPermission('write_prescriptions'),
+  requireRole('doctor'),
   auditLogger(AUDIT_ACTIONS.DELETE, 'PRESCRIPTION'),
   async (req, res) => {
     try {
-      const prescription = await prescriptionRepository.getPrescriptionById(req.params.id);
+      const prescription = await PrescriptionRepository.getPrescriptionById(req.params.id);
 
       if (!prescription) {
         return res.status(404).json({ error: 'Prescription not found' });
       }
 
       // Check clinic access
-      if (prescription.clinicId !== req.user.clinicId) {
+      if (prescription.clinicId !== (req.user.clinicId || 1)) {
         return res.status(403).json({ error: 'Access denied - different clinic' });
       }
 
@@ -433,7 +498,11 @@ router.delete('/:id',
         return res.status(400).json({ error: 'Cannot cancel filled prescriptions' });
       }
 
-      await prescriptionRepository.cancelPrescription(req.params.id, req.user.userId);
+      const deleted = await PrescriptionRepository.cancelPrescription(req.params.id, req.user.userId);
+
+      if (!deleted) {
+        return res.status(500).json({ error: 'Failed to cancel prescription' });
+      }
 
       res.json({ message: 'Prescription cancelled successfully' });
     } catch (error) {
@@ -461,9 +530,9 @@ router.get('/pharmacies/list',
       if (isActive !== undefined) filters.isActive = isActive === 'true';
       if (deliveryAvailable !== undefined) filters.deliveryAvailable = deliveryAvailable === 'true';
 
-      const pharmacies = await prescriptionRepository.getAllPharmacies(filters);
+      const pharmacies = await PrescriptionRepository.getAllPharmacies(filters);
 
-      res.json(pharmacies);
+      res.json(pharmacies.map(p => p.toJSON()));
     } catch (error) {
       console.error('Error fetching pharmacies:', error);
       res.status(500).json({ error: 'Failed to fetch pharmacies' });
@@ -480,13 +549,13 @@ router.get('/pharmacies/:id',
   authenticate,
   async (req, res) => {
     try {
-      const pharmacy = await prescriptionRepository.getPharmacyById(req.params.id);
+      const pharmacy = await PrescriptionRepository.getPharmacyById(req.params.id);
 
       if (!pharmacy) {
         return res.status(404).json({ error: 'Pharmacy not found' });
       }
 
-      res.json(pharmacy);
+      res.json(pharmacy.toJSON());
     } catch (error) {
       console.error('Error fetching pharmacy:', error);
       res.status(500).json({ error: 'Failed to fetch pharmacy' });
@@ -504,9 +573,9 @@ router.post('/pharmacies',
   checkPermission('manage_settings'),
   async (req, res) => {
     try {
-      const pharmacy = await prescriptionRepository.createPharmacy(req.body);
+      const pharmacy = await PrescriptionRepository.createPharmacy(req.body);
 
-      res.status(201).json(pharmacy);
+      res.status(201).json(pharmacy.toJSON());
     } catch (error) {
       console.error('Error creating pharmacy:', error);
       res.status(500).json({ error: 'Failed to create pharmacy' });
@@ -533,7 +602,7 @@ router.get('/patient/:patientId/stats',
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const stats = await prescriptionRepository.getPatientPrescriptionStats(patientId);
+      const stats = await PrescriptionRepository.getPatientPrescriptionStats(patientId);
 
       res.json(stats);
     } catch (error) {

@@ -7,8 +7,8 @@ const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 const campaignRepo = new CampaignRepository();
-const patientRepo = new PatientRepository();
-const audienceService = new AudienceFilterService(patientRepo);
+// PatientRepository now uses static methods, pass the class itself
+const audienceService = new AudienceFilterService(PatientRepository);
 
 function auditLog(action, details, req) {
   console.log('[AUDIT][CAMPAIGN]', {
@@ -42,7 +42,7 @@ router.get('/:id', authenticate, (req, res) => {
   }
 });
 
-router.post('/', authenticate, (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   try {
     const campaignData = {
       ...req.body,
@@ -59,7 +59,7 @@ router.post('/', authenticate, (req, res) => {
     }
 
     if (campaign.targetAudience) {
-      const estimatedReach = audienceService.getEstimatedReach(campaign.targetAudience);
+      const estimatedReach = await audienceService.getEstimatedReach(campaign.targetAudience);
       campaign.estimatedReach = estimatedReach;
     }
 
@@ -73,7 +73,7 @@ router.post('/', authenticate, (req, res) => {
   }
 });
 
-router.put('/:id', authenticate, (req, res) => {
+router.put('/:id', authenticate, async (req, res) => {
   try {
     const existing = campaignRepo.getById(req.params.id);
     if (!existing) {
@@ -93,7 +93,7 @@ router.put('/:id', authenticate, (req, res) => {
     }
 
     if (updates.targetAudience) {
-      const estimatedReach = audienceService.getEstimatedReach(updates.targetAudience);
+      const estimatedReach = await audienceService.getEstimatedReach(updates.targetAudience);
       campaign.estimatedReach = estimatedReach;
     }
 
@@ -127,7 +127,7 @@ router.delete('/:id', authenticate, (req, res) => {
   }
 });
 
-router.post('/preview-audience', authenticate, (req, res) => {
+router.post('/preview-audience', authenticate, async (req, res) => {
   try {
     const { targetAudience, limit } = req.body;
 
@@ -135,7 +135,7 @@ router.post('/preview-audience', authenticate, (req, res) => {
       return res.status(400).json({ error: 'Target audience criteria is required' });
     }
 
-    const preview = audienceService.previewAudience(targetAudience, limit || 10);
+    const preview = await audienceService.previewAudience(targetAudience, limit || 10);
     res.json(preview);
   } catch (error) {
     console.error('[AUDIENCE_PREVIEW_ERROR]', error);

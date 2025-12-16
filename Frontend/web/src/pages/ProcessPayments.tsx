@@ -1,6 +1,8 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
+import { apiUrl } from "../config/api";
 import "./Account.css"; 
 
 type Invoice = {
@@ -104,35 +106,98 @@ async function mockChargeGateway(req: PaymentRequest): Promise<Receipt> {
 }
 
 const ProcessPayments: React.FC = () => {
-  // Use auth if present, but don't block rendering (no backend yet)
   const auth = useAuth();
-  const user = auth?.user || {
-    id: "patient-123",
-    name: "Jane Doe",
-    role: "Patient",
-  };
-
+  const user = auth?.user;
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const invoiceIdParam = searchParams.get('invoiceId');
+  
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const toggleSidebar = () => setSidebarCollapsed((s) => !s);
+  
+  const [invoice, setInvoice] = useState<any>(null);
+  const [loadingInvoice, setLoadingInvoice] = useState(true);
+  const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+
+  // Fetch invoice data from backend
+  useEffect(() => {
+    const fetchInvoice = async () => {
+      if (!invoiceIdParam || !token) {
+        setLoadingInvoice(false);
+        return;
+      }
+      
+      try {
+        const response = await fetch(apiUrl(`invoices/${invoiceIdParam}`), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[DEBUG] Invoice data received:', data);
+          if (data && data.invoice) {
+            setInvoice(data.invoice);
+            setError(null);
+          } else {
+            console.error('Invalid invoice data structure:', data);
+            setError('Invalid invoice data received');
+            setInvoice(null);
+          }
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('Failed to fetch invoice:', response.status, errorData);
+          setError(errorData.error || `Failed to load invoice (${response.status})`);
+          setInvoice(null);
+        }
+      } catch (err: any) {
+        console.error('Error fetching invoice:', err);
+        setError(err.message || 'Failed to load invoice. Please try again.');
+        setInvoice(null);
+      } finally {
+        setLoadingInvoice(false);
+      }
+    };
+    
+    fetchInvoice();
+  }, [invoiceIdParam, token]);
 
   // DF-In/CL: compute copay from coverage
   const copayDue = useMemo(() => {
-    if (!mockCoveragePercent || mockCoveragePercent <= 0 || mockCoveragePercent >= 100) {
-      return mockInvoice.amountDue;
+    if (!invoice) return 0;
+    try {
+      const balanceDue = parseFloat(String(invoice.balanceDue || invoice.balance_due || invoice.totalAmount || invoice.total_amount || 0));
+      const coveragePercent = parseFloat(String(invoice.insuranceCoveragePercent || invoice.insurance_coverage_percent || 0));
+      
+      if (!coveragePercent || coveragePercent <= 0 || coveragePercent >= 100) {
+        return parseFloat(balanceDue.toFixed(2));
+      }
+      const uncovered = balanceDue * (1 - coveragePercent / 100);
+      return parseFloat(uncovered.toFixed(2));
+    } catch (err) {
+      console.error('Error calculating copay:', err);
+      return 0;
     }
-    const uncovered = mockInvoice.amountDue * (1 - mockCoveragePercent / 100);
-    return parseFloat(uncovered.toFixed(2));
-  }, []);
+  }, [invoice]);
 
   // Form state (DDD defaults)
   const [method, setMethod] = useState<PayMethod>("credit");
-  const [nameOnCard, setNameOnCard] = useState(user.name || mockInvoice.patientName);
+  const [nameOnCard, setNameOnCard] = useState(user?.name || "");
   const [cardNumber, setCardNumber] = useState("");
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
   const [zip, setZip] = useState("");
   const [hsaMemberId, setHsaMemberId] = useState("");
   const [amount, setAmount] = useState(copayDue);
+  
+  // Update amount when copayDue changes
+  useEffect(() => {
+    if (copayDue > 0) {
+      setAmount(copayDue);
+    }
+  }, [copayDue]);
 
   // UI / status
   const [error, setError] = useState<string | null>(null);
@@ -148,7 +213,7 @@ const ProcessPayments: React.FC = () => {
   function audit(action: string, details?: any) {
     console.log("[AUDIT]", {
       ts: new Date().toISOString(),
-      actor: user.id || "local",
+      actor: user?.id || user?.userId || "local",
       action,
       details,
     });
@@ -178,8 +243,15 @@ const ProcessPayments: React.FC = () => {
     }
 
     // DDV: require amount ≤ invoice due (no overpayments here)
-    if (amount > mockInvoice.amountDue) {
-      return "Amount exceeds invoice total.";
+    if (invoice) {
+      try {
+        const balanceDue = parseFloat(String(invoice.balanceDue || invoice.balance_due || invoice.totalAmount || invoice.total_amount || 0));
+        if (amount > balanceDue) {
+          return "Amount exceeds invoice balance.";
+        }
+      } catch (err) {
+        console.error('Error validating amount:', err);
+      }
     }
 
     return null;
@@ -198,41 +270,74 @@ const ProcessPayments: React.FC = () => {
     }
 
     setProcessing(true);
-    audit("PAYMENT_ATTEMPT", { invoiceId: mockInvoice.invoiceId, method, amount });
+    audit("PAYMENT_ATTEMPT", { invoiceId: invoiceIdParam || 'unknown', method, amount });
 
     try {
-      const req: PaymentRequest = {
-        amount: parseFloat(amount.toFixed(2)),
-        currency: "USD",
-        method,
-        nameOnCard: nameOnCard.trim(),
-        cardNumber: onlyDigits(cardNumber),
-        expiry,
-        cvv,
-        zip,
-        hsaMemberId: method === "hsa" ? hsaMemberId.trim() : undefined,
-        idempotencyKey: idempotencyKeyRef.current,
-      };
+      // Simulate payment gateway (in production, this would be a real payment processor)
+      await new Promise((r) => setTimeout(r, 800));
+      
+      // Generate receipt ID
+      const receiptId = `rcpt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const last4 = onlyDigits(cardNumber).slice(-4);
+      const gatewayTransactionId = `txn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      // SI-Out: to payment processor
-      const rcpt = await mockChargeGateway(req);
+      // Call backend to record payment
+      const response = await fetch(apiUrl(`invoices/${invoiceIdParam}/payments`), {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          amount: parseFloat(amount.toFixed(2)),
+          paymentMethod: method.toUpperCase(),
+          paymentReference: gatewayTransactionId,
+          receiptId: receiptId,
+          gatewayTransactionId: gatewayTransactionId,
+          last4: last4
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Payment failed');
+      }
+
+      const paymentData = await response.json();
 
       // DP: clear sensitive values after charge
       setCvv("");
       setCardNumber("");
 
-      // DF-Out: broadcast to billing ledger / receipts module (simulated)
+      // Create receipt object
+      const rcpt: Receipt = {
+        receiptId: receiptId,
+        invoiceId: invoiceIdParam || '',
+        patientId: invoice?.patientId || invoice?.patient_id || '',
+        amount: parseFloat(amount.toFixed(2)),
+        last4: last4,
+        method: method,
+        networkAuthCode: gatewayTransactionId.slice(-8).toUpperCase(),
+        createdAt: new Date().toISOString()
+      };
+
+      // DF-Out: broadcast to billing ledger / receipts module
       audit("PAYMENT_CAPTURED", rcpt);
 
       // ALR/NOT: friendly messages
       setReceipt(rcpt);
-      setSuccess("Payment successful. A receipt has been generated.");
-      setNotice("A confirmation email/SMS has been queued.");
+      setSuccess("Payment successful! Confirmation emails have been sent to you and your doctor.");
+      setNotice(`Invoice ${invoice?.invoiceNumber || invoice?.invoice_number || invoiceIdParam} has been marked as ${paymentData.invoiceStatus || 'PAID'}.`);
 
       // CC: rotate idempotency key to prevent accidental re-tries as new payments
       idempotencyKeyRef.current = `idem_${Date.now()}_${Math.random()
         .toString(36)
         .slice(2, 7)}`;
+
+      // Redirect to billing screen after 2 seconds
+      setTimeout(() => {
+        navigate('/billing');
+      }, 2000);
     } catch (e: any) {
       audit("PAYMENT_FAILED", { code: e?.code, message: e?.message });
       if (e?.code === "ETIMEOUT") {
@@ -247,12 +352,34 @@ const ProcessPayments: React.FC = () => {
 
   // CL: show derived copay, taxes/fees placeholder
   const derived = useMemo(() => {
-    const copay = copayDue;
+    if (!invoice) return { copay: 0, taxes: 0, convenienceFee: 0, total: 0 };
+    const copay = copayDue || 0;
     const taxes = 0;
     const convenienceFee = method === "debit" ? 0 : 0; // no fees for demo
     const total = parseFloat((copay + taxes + convenienceFee).toFixed(2));
     return { copay, taxes, convenienceFee, total };
-  }, [copayDue, method]);
+  }, [copayDue, method, invoice]);
+
+  // Show loading state if invoice is being fetched
+  if (loadingInvoice && !invoice) {
+    return (
+      <div className="dashboard-container">
+        <Sidebar isCollapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+        <div className={`main-content ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+          <header className="header">
+            <div className="header-left">
+              <h1 className="brand-title">MediConnect</h1>
+            </div>
+          </header>
+          <div className="dashboard-content">
+            <section className="account-section">
+              <p>Loading invoice...</p>
+            </section>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="dashboard-container">
@@ -304,10 +431,33 @@ const ProcessPayments: React.FC = () => {
             )}
 
             {/* Invoice summary (DF-In, DDD) */}
-            <div className="inline-hint" style={{ marginTop: 12 }}>
-              <strong>Invoice:</strong> {mockInvoice.invoiceId} —{" "}
-              {mockInvoice.serviceDesc} — Patient: {mockInvoice.patientName}
-            </div>
+            {loadingInvoice ? (
+              <div className="inline-hint" style={{ marginTop: 12 }}>
+                Loading invoice...
+              </div>
+            ) : error && !invoice ? (
+              <div className="inline-hint" style={{ marginTop: 12, color: '#e53e3e' }}>
+                <strong>Error:</strong> {error}
+                <br />
+                <button 
+                  onClick={() => window.location.reload()} 
+                  style={{ marginTop: 8, padding: '4px 8px', cursor: 'pointer' }}
+                >
+                  Reload Page
+                </button>
+              </div>
+            ) : invoice ? (
+              <div className="inline-hint" style={{ marginTop: 12 }}>
+                <strong>Invoice:</strong> {invoice.invoiceNumber || invoice.invoice_number || invoiceIdParam} —{" "}
+                {invoice.lineItems && Array.isArray(invoice.lineItems) && invoice.lineItems.length > 0 
+                  ? invoice.lineItems.map((item: any) => item.description || 'Service').join(', ')
+                  : 'Medical services'}
+              </div>
+            ) : (
+              <div className="inline-hint" style={{ marginTop: 12, color: '#e53e3e' }}>
+                Invoice not found. Please go back and try again.
+              </div>
+            )}
 
             {/* Payment method + fields */}
             <div
@@ -439,30 +589,30 @@ const ProcessPayments: React.FC = () => {
             <div className="summary-box" style={{ marginTop: 16 }}>
               <div className="summary-row">
                 <strong>Invoice total: </strong>
-                <span>${mockInvoice.amountDue.toFixed(2)}</span>
+                <span>${invoice ? parseFloat(invoice.balanceDue || invoice.balance_due || invoice.totalAmount || invoice.total_amount || 0).toFixed(2) : '0.00'}</span>
               </div>
               <div className="summary-row">
                 <strong>Coverage: </strong>
-                <span>{mockCoveragePercent}%</span>
+                <span>{invoice ? parseFloat(invoice.insuranceCoveragePercent || invoice.insurance_coverage_percent || 0) : 0}%</span>
               </div>
               <div className="summary-row">
                 <strong>Estimated copay: </strong>
-                <span>${derived.copay.toFixed(2)}</span>
+                <span>${(derived?.copay || 0).toFixed(2)}</span>
               </div>
               <div className="summary-row">
                 <strong>Taxes: </strong>
-                <span>${derived.taxes.toFixed(2)}</span>
+                <span>${(derived?.taxes || 0).toFixed(2)}</span>
               </div>
               <div className="summary-row">
                 <strong>Convenience fee:  </strong>
-                <span>${derived.convenienceFee.toFixed(2)}</span>
+                <span>${(derived?.convenienceFee || 0).toFixed(2)}</span>
               </div>
               <div className="summary-row">
                 <span>
                   <strong>Total recommended: </strong>
                 </span>
                 <span>
-                  <strong>${derived.total.toFixed(2)}</strong>
+                  <strong>${(derived?.total || 0).toFixed(2)}</strong>
                 </span>
               </div>
             </div>
@@ -472,10 +622,19 @@ const ProcessPayments: React.FC = () => {
               <button
                 className="primary-btn"
                 onClick={handlePay}
-                disabled={processing}
+                disabled={processing || !invoice || loadingInvoice || !!error}
               >
                 {processing ? "Processing…" : "Pay Now"}
               </button>
+              {!invoice && !loadingInvoice && (
+                <button
+                  className="secondary-btn"
+                  onClick={() => window.history.back()}
+                  style={{ marginLeft: 8 }}
+                >
+                  Go Back
+                </button>
+              )}
             </div>
 
             {/* DP: only show masked details */}

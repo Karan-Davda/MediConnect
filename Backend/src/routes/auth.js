@@ -105,6 +105,24 @@ router.post('/register', async (req, res) => {
           ]
         );
       } else if (role === 'doctor' || role === 'clinic_admin') {
+        // Map specialty to speciality_id if provided
+        let specialityId = null;
+        if (profile.specialty) {
+          // If specialty is a number (ID), use it directly
+          if (typeof profile.specialty === 'number' || !isNaN(parseInt(profile.specialty))) {
+            specialityId = parseInt(profile.specialty);
+          } else {
+            // If specialty is a string (name), look it up
+            const specialtyResult = await client.query(
+              'SELECT speciality_id FROM speciality WHERE speciality_name = $1 AND is_active = true',
+              [profile.specialty]
+            );
+            if (specialtyResult.rows.length > 0) {
+              specialityId = specialtyResult.rows[0].speciality_id;
+            }
+          }
+        }
+        
         await client.query(
           `INSERT INTO doctors (
             user_id, address, speciality_id, standard_healthcare_id,
@@ -113,7 +131,7 @@ router.post('/register', async (req, res) => {
           [
             user.user_id,
             null,
-            null, // TODO: Map specialty to speciality_id
+            specialityId,
             null,
             null,
             null
@@ -367,42 +385,72 @@ router.get('/me', async (req, res) => {
       clinic_id: user.clinic_id
     });
 
-    // Get role-specific IDs
+    // Get role-specific IDs (wrap in try-catch to prevent one role from breaking the endpoint)
     let patient_id = null;
     let doctor_id = null;
     let clinic_staff_id = null;
 
     if (user.role_name === 'patient') {
-      console.log(`[DEBUG /auth/me] User is a patient, fetching patient_id for user_id: ${user.user_id}`);
-      const patient = await PatientRepository.findByUserId(user.user_id);
-      if (patient) {
-        patient_id = patient.patient_id;
-        console.log(`[DEBUG /auth/me] Found patient_id: ${patient_id} for user_id: ${user.user_id}`);
-      } else {
-        console.log(`[DEBUG /auth/me] No patient record found for user_id: ${user.user_id}`);
+      try {
+        console.log(`[DEBUG /auth/me] User is a patient, fetching patient_id for user_id: ${user.user_id}`);
+        const patient = await PatientRepository.findByUserId(user.user_id);
+        if (patient) {
+          patient_id = patient.patient_id;
+          console.log(`[DEBUG /auth/me] Found patient_id: ${patient_id} for user_id: ${user.user_id}`);
+        } else {
+          console.log(`[DEBUG /auth/me] No patient record found for user_id: ${user.user_id}`);
+        }
+      } catch (error) {
+        console.error(`[DEBUG /auth/me] Error fetching patient record:`, error);
+        // Continue without patient_id - don't break the entire endpoint
       }
     } else if (user.role_name === 'doctor') {
-      console.log(`[DEBUG /auth/me] User is a doctor, fetching doctor_id for user_id: ${user.user_id}`);
-      const doctor = await DoctorRepository.findByUserId(user.user_id);
-      if (doctor) {
-        doctor_id = doctor.doctor_id;
-        console.log(`[DEBUG /auth/me] Found doctor_id: ${doctor_id} for user_id: ${user.user_id}`);
-      } else {
-        console.log(`[DEBUG /auth/me] No doctor record found for user_id: ${user.user_id}`);
+      try {
+        console.log(`[DEBUG /auth/me] User is a doctor, fetching doctor_id for user_id: ${user.user_id}`);
+        const doctor = await DoctorRepository.findByUserId(user.user_id);
+        if (doctor) {
+          doctor_id = doctor.doctor_id;
+          console.log(`[DEBUG /auth/me] Found doctor_id: ${doctor_id} for user_id: ${user.user_id}`);
+        } else {
+          console.log(`[DEBUG /auth/me] No doctor record found for user_id: ${user.user_id}`);
+        }
+      } catch (error) {
+        console.error(`[DEBUG /auth/me] Error fetching doctor record:`, error);
+        // Continue without doctor_id - don't break the entire endpoint
       }
     } else if (user.role_name === 'clinic_staff' || user.role_name === 'clinic_admin') {
-      console.log(`[DEBUG /auth/me] User is clinic_staff/admin, fetching clinic_staff_id for user_id: ${user.user_id}`);
-      const ClinicStaffRepository = require('../repositories/ClinicStaffRepository');
-      const clinicStaff = await ClinicStaffRepository.findByUserId(user.user_id);
-      if (clinicStaff) {
-        clinic_staff_id = clinicStaff.clinic_staff_id;
-        console.log(`[DEBUG /auth/me] Found clinic_staff_id: ${clinic_staff_id} for user_id: ${user.user_id}`);
-      } else {
-        console.log(`[DEBUG /auth/me] No clinic_staff record found for user_id: ${user.user_id}`);
+      try {
+        console.log(`[DEBUG /auth/me] User is clinic_staff/admin, fetching clinic_staff_id for user_id: ${user.user_id}`);
+        const ClinicStaffRepository = require('../repositories/ClinicStaffRepository');
+        const clinicStaff = await ClinicStaffRepository.findByUserId(user.user_id);
+        if (clinicStaff) {
+          clinic_staff_id = clinicStaff.clinic_staff_id;
+          console.log(`[DEBUG /auth/me] Found clinic_staff_id: ${clinic_staff_id} for user_id: ${user.user_id}`);
+        } else {
+          console.log(`[DEBUG /auth/me] No clinic_staff record found for user_id: ${user.user_id}`);
+        }
+      } catch (error) {
+        console.error(`[DEBUG /auth/me] Error fetching clinic_staff record:`, error);
+        // Continue without clinic_staff_id - don't break the entire endpoint
       }
     } else {
       console.log(`[DEBUG /auth/me] Unknown role: ${user.role_name} for user_id: ${user.user_id}`);
     }
+
+    // Check if profile is complete (for doctors and clinic admins)
+    let profileComplete = true;
+    if (user.role_name === 'doctor' || user.role_name === 'clinic_admin') {
+      try {
+        const doctor = await DoctorRepository.findByUserId(user.user_id);
+        // Profile is incomplete if license_number is missing
+        profileComplete = doctor && doctor.license_number;
+      } catch (error) {
+        console.error(`[DEBUG /auth/me] Error checking profile completion:`, error);
+        // Default to true if we can't check
+        profileComplete = true;
+      }
+    }
+    // For patients, profileComplete is always true (no special requirements)
 
     const responseData = {
       id: String(user.user_id),
@@ -415,7 +463,8 @@ router.get('/me', async (req, res) => {
       clinic_id: user.clinic_id,
       patient_id: patient_id,
       doctor_id: doctor_id,
-      clinic_staff_id: clinic_staff_id
+      clinic_staff_id: clinic_staff_id,
+      profileComplete: profileComplete
     };
 
     console.log(`[DEBUG /auth/me] Response data:`, {
@@ -424,7 +473,8 @@ router.get('/me', async (req, res) => {
       patient_id: responseData.patient_id,
       doctor_id: responseData.doctor_id,
       clinic_staff_id: responseData.clinic_staff_id,
-      clinic_id: responseData.clinic_id
+      clinic_id: responseData.clinic_id,
+      profileComplete: responseData.profileComplete
     });
     
     res.json(responseData);

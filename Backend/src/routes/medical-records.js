@@ -4,6 +4,9 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const { PERMISSIONS, hasPermission } = require('../models/Role');
 const { logAccess, AUDIT_ACTIONS } = require('../middleware/auditLogger');
 const upload = require('../middleware/upload');
+const uploadServiceResult = require('../middleware/uploadServiceResult');
+const { uploadToS3, getSignedUrlForFile } = require('../services/s3Service');
+const ClinicServiceRepository = require('../repositories/ClinicServiceRepository');
 const {
   createPatient,
   findPatientById,
@@ -19,6 +22,7 @@ const {
   getPatientMedicalHistory
 } = require('../repositories/MedicalRecordRepository');
 const PatientRepository = require('../repositories/PatientRepository');
+const PrescriptionRepository = require('../repositories/PrescriptionRepository');
 const { sendNotification } = require('../services/notificationService');
 
 const router = express.Router();
@@ -359,6 +363,202 @@ router.post('/', authenticate, canManageMedicalRecords, async (req, res) => {
       details: `Created medical record for patient: ${patient.fullName}`
     });
 
+    // Auto-create prescriptions for medication treatments
+    if (recordData.treatments && Array.isArray(recordData.treatments)) {
+      const medicationTreatments = recordData.treatments.filter(
+        treatment => treatment.type === 'medication' && 
+        treatment.name && 
+        treatment.name.trim() !== ''
+      );
+
+      if (medicationTreatments.length > 0) {
+        console.log(`[PRESCRIPTIONS] Found ${medicationTreatments.length} medication treatments, creating prescriptions...`);
+        
+        const createdPrescriptions = [];
+        
+        for (const treatment of medicationTreatments) {
+          try {
+            // Extract dosage and unit (e.g., "400mg" -> dosage: "400", unit: "mg")
+            let dosage = treatment.dosage || '';
+            let dosageUnit = 'mg'; // default
+            if (dosage) {
+              const dosageMatch = dosage.match(/^([0-9]+\.?[0-9]*)\s*([a-zA-Z]+)?$/);
+              if (dosageMatch) {
+                dosage = dosageMatch[1];
+                if (dosageMatch[2]) {
+                  dosageUnit = dosageMatch[2].toLowerCase();
+                }
+              }
+            }
+
+            // Extract frequency (default to "once daily" if not provided)
+            // If frequency is empty or not provided, use a sensible default
+            let frequency = treatment.frequency;
+            if (!frequency || frequency.trim() === '') {
+              frequency = 'once daily';
+            }
+
+            // Extract duration (default to "7 days" if not provided)
+            // If duration is empty or not provided, use a sensible default
+            let duration = treatment.duration;
+            if (!duration || duration.trim() === '') {
+              duration = '7 days';
+            }
+
+            // Calculate quantity based on frequency and duration
+            // Simple calculation: if "3 times daily" for "7 days", quantity = 3 * 7 = 21
+            let quantity = 1;
+            try {
+              const freqMatch = frequency.match(/(\d+)/);
+              const freqNum = freqMatch ? parseInt(freqMatch[1]) : 1;
+              const durationMatch = duration.match(/(\d+)/);
+              const durationNum = durationMatch ? parseInt(durationMatch[1]) : 7;
+              quantity = freqNum * durationNum;
+              // Ensure minimum quantity of 1
+              if (quantity < 1) quantity = 1;
+            } catch (calcError) {
+              console.warn('[PRESCRIPTIONS] Could not calculate quantity, using default:', calcError);
+              quantity = 7; // Default to 7
+            }
+
+            // Get patient name
+            const patientName = patient.fullName || `${patient.firstName || ''} ${patient.lastName || ''}`.trim();
+
+            // Create prescription
+            const prescription = await PrescriptionRepository.createPrescription({
+              patientId: recordData.patientId,
+              patientName: patientName,
+              medicalRecordId: record.id, // Link to the medical record
+              providerId: doctorId,
+              providerName: req.user.name || 'Unknown Provider',
+              clinicId: req.user.clinicId || 1,
+              medicationName: treatment.name.trim(),
+              medicationCode: treatment.code || null,
+              dosage: dosage,
+              dosageUnit: dosageUnit,
+              form: treatment.form || 'tablet',
+              frequency: frequency,
+              route: treatment.route || 'oral',
+              duration: duration,
+              quantity: quantity,
+              refills: 0, // Default to 0 refills
+              startDate: recordData.visitDate || new Date(),
+              endDate: null,
+              instructions: treatment.instructions || treatment.description || null,
+              indication: recordData.chiefComplaint || null,
+              pharmacyId: null, // Can be set later
+              notes: treatment.notes || null,
+              priority: 'routine',
+              substitutionAllowed: true,
+              daw: false,
+              createdBy: req.user.userId
+            });
+
+            createdPrescriptions.push(prescription);
+            console.log(`[PRESCRIPTIONS] Created prescription ${prescription.id} for medication: ${treatment.name}`);
+          } catch (prescriptionError) {
+            // Log error but don't fail the medical record creation
+            console.error(`[PRESCRIPTIONS] Failed to create prescription for medication "${treatment.name}":`, prescriptionError);
+          }
+        }
+
+        if (createdPrescriptions.length > 0) {
+          console.log(`[PRESCRIPTIONS] Successfully created ${createdPrescriptions.length} prescription(s) for medical record ${record.id}`);
+        }
+      }
+    }
+
+    // Auto-generate invoice if charges are provided
+    if (req.body.charges && (req.body.charges.consultation || (req.body.charges.services && req.body.charges.services.length > 0))) {
+      try {
+        const InvoiceRepository = require('../repositories/InvoiceRepository');
+        const ClinicServiceRepository = require('../repositories/ClinicServiceRepository');
+        const DoctorRepository = require('../repositories/DoctorRepository');
+        
+        // Get doctor's consultation fee
+        const doctor = await DoctorRepository.findById(doctorId);
+        const consultationFee = doctor?.fees || 0;
+        
+        // Build line items
+        const lineItems = [];
+        
+        // Add consultation fee
+        if (req.body.charges.consultation !== false && consultationFee > 0) {
+          lineItems.push({
+            service_id: null,
+            service_code: 'CONSULTATION',
+            description: 'Primary Care Consultation',
+            quantity: 1,
+            unit_price: consultationFee,
+            total: consultationFee,
+            service_type: 'consultation'
+          });
+        }
+        
+        // Add clinic services
+        if (req.body.charges.services && Array.isArray(req.body.charges.services)) {
+          for (const serviceItem of req.body.charges.services) {
+            const service = await ClinicServiceRepository.findById(serviceItem.service_id);
+            if (service && service.is_active) {
+              const quantity = serviceItem.quantity || 1;
+              const total = parseFloat(service.unit_price) * quantity;
+              lineItems.push({
+                service_id: service.service_id,
+                service_code: service.service_code,
+                description: service.service_name,
+                quantity: quantity,
+                unit_price: parseFloat(service.unit_price),
+                total: total,
+                service_type: service.service_type
+              });
+            }
+          }
+        }
+        
+        // Calculate totals
+        const subtotal = lineItems.reduce((sum, item) => sum + item.total, 0);
+        const tax = req.body.charges.tax || 0;
+        const discount = req.body.charges.discount || 0;
+        const totalAmount = subtotal + tax - discount;
+        
+        // Get patient's insurance if available
+        let insuranceId = null;
+        let insuranceCoveragePercent = 0;
+        if (patient.insurance_id) {
+          const InsuranceRepository = require('../repositories/InsuranceRepository');
+          // Note: InsuranceRepository might be in-memory, adjust as needed
+          insuranceId = patient.insurance_id;
+          // You may want to fetch insurance details to get coverage_percentage
+        }
+        
+        // Create invoice
+        if (lineItems.length > 0 && totalAmount > 0) {
+          const invoice = await InvoiceRepository.create({
+            patient_id: patient.patient_id,
+            appointment_id: recordData.appointmentId || recordData.appt_id || null,
+            medical_record_id: parseInt(record.id.replace('record_', '')),
+            doctor_id: doctorId,
+            clinic_id: req.user.clinicId || 1, // Default clinic
+            service_date: recordData.visitDate || new Date(),
+            line_items: lineItems,
+            subtotal: subtotal,
+            tax: tax,
+            discount: discount,
+            total_amount: totalAmount,
+            insurance_id: insuranceId,
+            insurance_coverage_percent: insuranceCoveragePercent,
+            notes: req.body.charges.notes || null,
+            created_by: req.user.userId
+          });
+          
+          console.log(`[INFO] Auto-generated invoice ${invoice.invoice_number} for medical record ${record.id}`);
+        }
+      } catch (invoiceError) {
+        // Log error but don't fail the medical record creation
+        console.error('[ERROR] Failed to auto-generate invoice:', invoiceError);
+      }
+    }
+
     // Check for critical/abnormal lab results and trigger automatic notifications
     const labResults = record.labResults || [];
     const criticalOrAbnormalResults = labResults.filter(lr => 
@@ -421,6 +621,44 @@ router.get('/', authenticate, canViewMedicalRecords, async (req, res) => {
 
     const records = await findAllMedicalRecords(filters);
 
+    // Fetch invoice status for each record
+    const InvoiceRepository = require('../repositories/InvoiceRepository');
+    const { query } = require('../db/connection');
+    
+    const recordsWithInvoiceStatus = await Promise.all(records.map(async (record) => {
+      const recordJson = record.toJSON();
+      
+      // Extract record_id number
+      let recordIdNum = record.id;
+      if (typeof recordIdNum === 'string' && recordIdNum.startsWith('record_')) {
+        recordIdNum = parseInt(recordIdNum.replace('record_', ''));
+      }
+      
+      // Check if there's an invoice for this medical record with status PAID
+      try {
+        const invoiceResult = await query(
+          `SELECT status, invoice_id FROM invoices 
+           WHERE medical_record_id = $1 AND status = 'PAID' 
+           LIMIT 1`,
+          [recordIdNum]
+        );
+        
+        if (invoiceResult.rows.length > 0) {
+          recordJson.invoiceStatus = 'PAID';
+          recordJson.isPaid = true;
+        } else {
+          recordJson.invoiceStatus = null;
+          recordJson.isPaid = false;
+        }
+      } catch (err) {
+        console.error(`[ERROR] Failed to check invoice status for record ${recordIdNum}:`, err);
+        recordJson.invoiceStatus = null;
+        recordJson.isPaid = false;
+      }
+      
+      return recordJson;
+    }));
+
     logAccess(req, AUDIT_ACTIONS.VIEW, {
       resourceType: 'MEDICAL_RECORD',
       details: `Viewed ${records.length} medical records`
@@ -428,7 +666,7 @@ router.get('/', authenticate, canViewMedicalRecords, async (req, res) => {
 
     res.json({
       count: records.length,
-      records: records.map(r => r.toJSON())
+      records: recordsWithInvoiceStatus
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -462,14 +700,111 @@ router.get('/:id', authenticate, canViewMedicalRecords, async (req, res) => {
       }
     }
 
+    // Check invoice status
+    const { query } = require('../db/connection');
+    const recordJson = record.toJSON();
+    
+    // Extract record_id number
+    let recordIdNum = record.id;
+    if (typeof recordIdNum === 'string' && recordIdNum.startsWith('record_')) {
+      recordIdNum = parseInt(recordIdNum.replace('record_', ''));
+    }
+    
+    // Check if there's an invoice for this medical record with status PAID
+    try {
+      const invoiceResult = await query(
+        `SELECT status, invoice_id FROM invoices 
+         WHERE medical_record_id = $1 AND status = 'PAID' 
+         LIMIT 1`,
+        [recordIdNum]
+      );
+      
+      if (invoiceResult.rows.length > 0) {
+        recordJson.invoiceStatus = 'PAID';
+        recordJson.isPaid = true;
+      } else {
+        recordJson.invoiceStatus = null;
+        recordJson.isPaid = false;
+      }
+    } catch (err) {
+      console.error(`[ERROR] Failed to check invoice status for record ${recordIdNum}:`, err);
+      recordJson.invoiceStatus = null;
+      recordJson.isPaid = false;
+    }
+
     logAccess(req, AUDIT_ACTIONS.VIEW, {
       resourceType: 'MEDICAL_RECORD',
       resourceId: record.id
     });
 
-    res.json(record.toJSON());
+    res.json(recordJson);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/medical-records/:id/bill-amount
+ * Calculate bill amount for a medical record (doctor consultation fee only)
+ */
+router.get('/:id/bill-amount', authenticate, canManageMedicalRecords, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Parse record ID (handle "record_123" format)
+    let recordIdNum = id;
+    if (typeof id === 'string' && id.startsWith('record_')) {
+      recordIdNum = parseInt(id.replace('record_', ''));
+    } else {
+      recordIdNum = parseInt(id);
+    }
+
+    const record = await findMedicalRecordById(recordIdNum);
+
+    if (!record) {
+      return res.status(404).json({ error: 'Medical record not found' });
+    }
+
+    const DoctorRepository = require('../repositories/DoctorRepository');
+
+    // Get doctor's consultation fee
+    // Note: record.providerId is actually doctor_id (from doctors table), not user_id
+    let consultationFee = 0;
+    if (record.providerId) {
+      // Parse providerId (which is doctor_id)
+      let doctorIdNum = record.providerId;
+      if (typeof record.providerId === 'string' && record.providerId.startsWith('doctor_')) {
+        doctorIdNum = parseInt(record.providerId.replace('doctor_', ''));
+      } else {
+        doctorIdNum = parseInt(record.providerId);
+      }
+      
+      // Use findById since providerId is doctor_id
+      const doctor = await DoctorRepository.findById(doctorIdNum);
+      if (doctor && doctor.fees) {
+        consultationFee = parseFloat(doctor.fees) || 0;
+      }
+      
+      console.log(`[DEBUG] Bill calculation - doctorId: ${doctorIdNum}, consultationFee: ${consultationFee}`);
+    }
+
+    // Calculate total amount (only consultation fee)
+    const totalAmount = consultationFee;
+    console.log(`[DEBUG] Bill calculation - consultationFee: ${consultationFee}, totalAmount: ${totalAmount}`);
+
+    res.json({
+      consultationFee,
+      totalAmount,
+      breakdown: {
+        consultation: consultationFee > 0 ? {
+          description: 'Primary Care Consultation',
+          amount: consultationFee
+        } : null
+      }
+    });
+  } catch (error) {
+    console.error('[ERROR] Error calculating bill amount:', error);
+    res.status(500).json({ error: error.message || 'Failed to calculate bill amount' });
   }
 });
 
@@ -495,6 +830,43 @@ router.get('/patient/:patientId', authenticate, canViewMedicalRecords, async (re
 
     const records = await findMedicalRecordsByPatientId(patientId, options);
 
+    // Fetch invoice status for each record
+    const { query } = require('../db/connection');
+    
+    const recordsWithInvoiceStatus = await Promise.all(records.map(async (record) => {
+      const recordJson = record.toJSON();
+      
+      // Extract record_id number
+      let recordIdNum = record.id;
+      if (typeof recordIdNum === 'string' && recordIdNum.startsWith('record_')) {
+        recordIdNum = parseInt(recordIdNum.replace('record_', ''));
+      }
+      
+      // Check if there's an invoice for this medical record with status PAID
+      try {
+        const invoiceResult = await query(
+          `SELECT status, invoice_id FROM invoices 
+           WHERE medical_record_id = $1 AND status = 'PAID' 
+           LIMIT 1`,
+          [recordIdNum]
+        );
+        
+        if (invoiceResult.rows.length > 0) {
+          recordJson.invoiceStatus = 'PAID';
+          recordJson.isPaid = true;
+        } else {
+          recordJson.invoiceStatus = null;
+          recordJson.isPaid = false;
+        }
+      } catch (err) {
+        console.error(`[ERROR] Failed to check invoice status for record ${recordIdNum}:`, err);
+        recordJson.invoiceStatus = null;
+        recordJson.isPaid = false;
+      }
+      
+      return recordJson;
+    }));
+
     logAccess(req, AUDIT_ACTIONS.VIEW, {
       resourceType: 'MEDICAL_RECORD',
       resourceId: patientId,
@@ -504,7 +876,7 @@ router.get('/patient/:patientId', authenticate, canViewMedicalRecords, async (re
     res.json({
       patientId,
       count: records.length,
-      records: records.map(r => r.toJSON())
+      records: recordsWithInvoiceStatus
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -718,19 +1090,20 @@ const handleMulterError = (err, req, res, next) => {
   next();
 };
 
-router.post('/:recordId/attachments', authenticate, canManageMedicalRecords, upload.single('scanFile'), handleMulterError, async (req, res) => {
+router.post('/:recordId/attachments', authenticate, canManageMedicalRecords, uploadServiceResult.single('file'), handleMulterError, async (req, res) => {
   try {
     const { recordId } = req.params;
-    const { name, type } = req.body;
+    const { name, type, service_id, service_code } = req.body;
 
     console.log('Upload request received:', {
       recordId,
       name,
       type,
+      service_id,
+      service_code,
       hasFile: !!req.file,
       fileInfo: req.file ? {
         originalname: req.file.originalname,
-        filename: req.file.filename,
         size: req.file.size,
         mimetype: req.file.mimetype
       } : null
@@ -748,42 +1121,60 @@ router.post('/:recordId/attachments', authenticate, canManageMedicalRecords, upl
     if (!req.file) {
       return res.status(400).json({ 
         error: 'No file uploaded',
-        message: 'Please select an image file to upload'
+        message: 'Please select a file to upload'
       });
     }
 
     const record = await findMedicalRecordById(recordId);
     if (!record) {
-      // Delete uploaded file if record not found
-      if (req.file) {
-        const fs = require('fs');
-        fs.unlinkSync(req.file.path);
-      }
       return res.status(404).json({ error: 'Medical record not found' });
     }
 
     // Check clinic access
     if (req.user.clinicId && record.clinicId !== req.user.clinicId) {
-      // Delete uploaded file if access denied
-      if (req.file) {
-        const fs = require('fs');
-        fs.unlinkSync(req.file.path);
-      }
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Create URL for the uploaded file
-    const fileUrl = `/api/medical-records/assets/${req.file.filename}`;
+    // Get service info if service_id provided
+    let service = null;
+    let serviceName = name; // Default to provided name
+    if (service_id) {
+      service = await ClinicServiceRepository.findById(parseInt(service_id));
+      if (service) {
+        serviceName = service.service_name;
+      }
+    } else if (service_code) {
+      service = await ClinicServiceRepository.findByCode(service_code);
+      if (service) {
+        serviceName = service.service_name;
+      }
+    }
 
-    // Create attachment object
+    // Upload file to S3
+    const folder = service ? 
+      `service-results/${service.service_type}` : 
+      'attachments';
+    
+    const s3Result = await uploadToS3(
+      req.file.buffer,
+      req.file.originalname,
+      folder,
+      req.file.mimetype
+    );
+
+    // Create attachment object with S3 reference
     const attachment = {
       id: `attachment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name,
-      type,
-      url: fileUrl,
-      filename: req.file.filename,
-      originalName: req.file.originalname,
-      size: req.file.size,
+      name: serviceName || name,
+      type: type,
+      service_id: service ? service.service_id : (service_id ? parseInt(service_id) : null),
+      service_code: service ? service.service_code : service_code,
+      service_name: serviceName,
+      s3_key: s3Result.key,
+      s3_url: s3Result.url,
+      file_name: req.file.originalname,
+      file_type: req.file.mimetype,
+      file_size: req.file.size,
       date: new Date().toISOString()
     };
 
@@ -800,32 +1191,74 @@ router.post('/:recordId/attachments', authenticate, canManageMedicalRecords, upl
     });
 
     logAccess(req, AUDIT_ACTIONS.CREATE, {
-      resourceType: 'SCAN_ATTACHMENT',
+      resourceType: 'SERVICE_ATTACHMENT',
       resourceId: attachment.id,
-      details: `Added scan attachment: ${name} to medical record ${recordId}`
+      details: `Added ${service ? 'service' : ''} attachment: ${name} to medical record ${recordId}`
     });
 
     res.status(201).json({
-      message: 'Scan attachment added successfully',
+      message: 'Attachment added successfully',
       attachment
     });
   } catch (error) {
-    // Delete uploaded file if there's an error
-    if (req.file) {
-      const fs = require('fs');
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (unlinkError) {
-        console.error('Error deleting file:', unlinkError);
-      }
+    console.error('Error uploading attachment:', error);
+    res.status(500).json({ error: error.message || 'Failed to upload attachment' });
+  }
+});
+
+/**
+ * GET /api/medical-records/attachments/:attachmentId/download
+ * Get signed URL for downloading attachment from S3
+ */
+router.get('/attachments/:attachmentId/download', authenticate, canViewMedicalRecords, async (req, res) => {
+  try {
+    const { attachmentId } = req.params;
+    const { recordId } = req.query;
+
+    if (!recordId) {
+      return res.status(400).json({ error: 'recordId query parameter is required' });
     }
-    res.status(500).json({ error: error.message });
+
+    const record = await findMedicalRecordById(recordId);
+    if (!record) {
+      return res.status(404).json({ error: 'Medical record not found' });
+    }
+
+    // Check clinic access
+    if (req.user.clinicId && record.clinicId !== req.user.clinicId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Find attachment
+    const attachment = record.attachments?.find(a => a.id === attachmentId);
+    if (!attachment) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+
+    // Generate signed URL if S3 file
+    if (attachment.s3_key || attachment.s3_url) {
+      const key = attachment.s3_key || attachment.s3_url.replace(`s3://${process.env.AWS_S3_BUCKET_NAME || 'mediconnect-medical-files'}/`, '');
+      const signedUrl = await getSignedUrlForFile(key, 3600); // 1 hour expiry
+
+      return res.json({
+        attachmentId,
+        fileName: attachment.file_name || attachment.name,
+        signedUrl,
+        expiresIn: 3600
+      });
+    }
+
+    // Fallback for old local file attachments
+    return res.status(404).json({ error: 'File not available (legacy attachment)' });
+  } catch (error) {
+    console.error('Error generating download URL:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate download URL' });
   }
 });
 
 /**
  * GET /api/medical-records/assets/:filename
- * Serve uploaded scan images
+ * Serve uploaded scan images (legacy - for old local files)
  */
 router.get('/assets/:filename', authenticate, (req, res) => {
   try {

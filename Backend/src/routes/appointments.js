@@ -3,13 +3,20 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const AppointmentRepository = require('../repositories/AppointmentRepository');
 const PatientRepository = require('../repositories/PatientRepository');
 const DoctorRepository = require('../repositories/DoctorRepository');
+const UserRepository = require('../repositories/UserRepository');
 const { logAccess, AUDIT_ACTIONS } = require('../middleware/auditLogger');
+const { sendAppointmentConfirmationEmail } = require('../services/notificationService');
 const { query } = require('../db/connection');
 const router = express.Router();
 
 // Test endpoint to verify route is registered
 router.get('/test', (req, res) => {
   res.json({ message: 'Appointments route is working!' });
+});
+
+// Test availability route
+router.get('/availability/test', (req, res) => {
+  res.json({ message: 'Availability routes are working!' });
 });
 
 /**
@@ -19,7 +26,9 @@ router.get('/test', (req, res) => {
 router.get('/doctors', authenticate, async (req, res) => {
   try {
     console.log('[DEBUG] Fetching all doctors for dropdown');
-    const doctors = await DoctorRepository.getAll();
+    // Use default clinic_id = 1 for single-clinic mode
+    const defaultClinicId = 1;
+    const doctors = await DoctorRepository.getAll(defaultClinicId);
     
     console.log(`[DEBUG] Found ${doctors.length} doctors in database`);
     
@@ -197,31 +206,346 @@ router.get('/available-slots/:doctorId', authenticate, async (req, res) => {
   }
 });
 
+// ==================== AVAILABILITY MANAGEMENT ROUTES ====================
+// NOTE: These must come BEFORE /:apptId route to avoid route conflicts
+
 /**
- * Get a single appointment by ID
- * GET /api/appointments/:apptId
- * NOTE: This must come after more specific routes like /available-slots/:doctorId
+ * Save slots for a specific date
+ * POST /api/appointments/availability/:doctorId/save-slots-for-date
+ * Body: { date: 'YYYY-MM-DD', day_of_week: 1-7 (ISO: Monday=1, Tuesday=2, ..., Sunday=7), slots: [{ fromTime, toTime, duration }] }
  */
-router.get('/:apptId', authenticate, async (req, res) => {
+router.post('/availability/:doctorId/save-slots-for-date', authenticate, requireRole('doctor'), async (req, res) => {
+  console.log('[DEBUG] POST /availability/:doctorId/save-slots-for-date hit');
+  console.log('[DEBUG] Params:', req.params);
+  console.log('[DEBUG] Body:', req.body);
   try {
-    const { apptId } = req.params;
-    const appointment = await AppointmentRepository.findById(parseInt(apptId));
-    
-    if (!appointment) {
-      return res.status(404).json({ error: 'Appointment not found' });
+    const { doctorId } = req.params;
+    const { date, day_of_week, slots } = req.body;
+
+    if (!date || !slots || !Array.isArray(slots) || slots.length === 0) {
+      return res.status(400).json({ error: 'date and slots array are required' });
     }
 
-    res.json({ appointment });
+    const doctorIdNum = parseInt(doctorId, 10);
+    if (isNaN(doctorIdNum)) {
+      return res.status(400).json({ error: 'Invalid doctor ID' });
+    }
+
+    // Verify doctor exists and matches the logged-in user
+    const doctor = await DoctorRepository.findByUserId(req.user.userId);
+    if (!doctor || doctor.doctor_id !== doctorIdNum) {
+      return res.status(403).json({ error: 'Access denied. You can only manage your own availability.' });
+    }
+
+    const { query } = require('../db/connection');
+    let savedCount = 0;
+    const errors = [];
+
+    // Insert each slot
+    for (const slot of slots) {
+      try {
+        const { fromTime, toTime, duration } = slot;
+        
+        if (!fromTime || !toTime) {
+          errors.push(`Slot missing fromTime or toTime: ${JSON.stringify(slot)}`);
+          continue;
+        }
+
+        // Insert slot - matching exact schema columns
+        // Schema: availability_id (auto), doctor_id, day_of_week, start_time, end_time, 
+        //         is_available, created_at (default), updated_at (default), slot_date, status
+        const result = await query(
+          `INSERT INTO doctor_availability (
+            doctor_id, slot_date, day_of_week, start_time, end_time, 
+            is_available, status
+          ) VALUES ($1, $2::date, $3, $4::time, $5::time, $6, $7)
+          RETURNING availability_id`,
+          [doctorIdNum, date, day_of_week || null, fromTime, toTime, true, 'open']
+        );
+
+        if (result.rows.length > 0) {
+          savedCount++;
+        }
+      } catch (slotError) {
+        console.error(`Error saving slot ${JSON.stringify(slot)}:`, slotError);
+        errors.push(`Failed to save slot ${slot.fromTime}-${slot.toTime}: ${slotError.message}`);
+      }
+    }
+
+    if (savedCount === 0 && errors.length > 0) {
+      return res.status(400).json({ 
+        error: 'Failed to save any slots', 
+        details: errors 
+      });
+    }
+
+    res.json({
+      message: `Successfully saved ${savedCount} slot(s) for ${date}`,
+      saved: savedCount,
+      total: slots.length,
+      errors: errors.length > 0 ? errors : undefined
+    });
   } catch (error) {
-    console.error('[ERROR] Error fetching appointment:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch appointment' });
+    console.error('Error saving slots:', error);
+    res.status(500).json({ error: error.message || 'Failed to save slots' });
+  }
+});
+
+/**
+ * Get slots by date range
+ * GET /api/appointments/availability/:doctorId/by-date-range?fromDate=YYYY-MM-DD&toDate=YYYY-MM-DD&dayOfWeek=1,2,3 (ISO: Monday=1, Tuesday=2, ..., Sunday=7)
+ */
+router.get('/availability/:doctorId/by-date-range', authenticate, async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { fromDate, toDate, dayOfWeek } = req.query;
+
+    if (!fromDate || !toDate) {
+      return res.status(400).json({ error: 'fromDate and toDate are required (YYYY-MM-DD format)' });
+    }
+
+    const doctorIdNum = parseInt(doctorId, 10);
+    if (isNaN(doctorIdNum)) {
+      return res.status(400).json({ error: 'Invalid doctor ID' });
+    }
+
+    const { query } = require('../db/connection');
+    
+    let queryStr = `
+      SELECT 
+        availability_id,
+        slot_date,
+        start_time,
+        end_time,
+        status,
+        day_of_week
+      FROM doctor_availability
+      WHERE doctor_id = $1
+        AND slot_date >= $2::date
+        AND slot_date <= $3::date
+        AND is_available = true
+    `;
+    
+    const params = [doctorIdNum, fromDate, toDate];
+    let paramCount = 4;
+
+    // Filter by day of week if provided
+    if (dayOfWeek) {
+      const dayNumbers = dayOfWeek.split(',').map(d => parseInt(d.trim())).filter(d => !isNaN(d));
+      if (dayNumbers.length > 0) {
+        queryStr += ` AND day_of_week = ANY($${paramCount}::int[])`;
+        params.push(dayNumbers);
+        paramCount++;
+      }
+    }
+
+    queryStr += ` ORDER BY slot_date ASC, start_time ASC`;
+
+    const result = await query(queryStr, params);
+
+    res.json({
+      count: result.rows.length,
+      slots: result.rows.map(row => {
+        // Calculate duration from start_time and end_time
+        const start = new Date(`2000-01-01T${row.start_time}`);
+        const end = new Date(`2000-01-01T${row.end_time}`);
+        const durationMinutes = Math.round((end - start) / (1000 * 60));
+        
+        return {
+          availability_id: row.availability_id,
+          date: row.slot_date,
+          start_time: row.start_time,
+          end_time: row.end_time,
+          duration_minutes: durationMinutes,
+          status: row.status,
+          day_of_week: row.day_of_week
+        };
+      })
+    });
+  } catch (error) {
+    console.error('Error fetching slots by date range:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch slots' });
+  }
+});
+
+/**
+ * Delete a slot
+ * DELETE /api/appointments/availability/:doctorId/slots?availability_id=123
+ */
+router.delete('/availability/:doctorId/slots', authenticate, requireRole('doctor'), async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { availability_id } = req.query;
+
+    if (!availability_id) {
+      return res.status(400).json({ error: 'availability_id is required' });
+    }
+
+    const doctorIdNum = parseInt(doctorId, 10);
+    const availabilityIdNum = parseInt(availability_id, 10);
+
+    if (isNaN(doctorIdNum) || isNaN(availabilityIdNum)) {
+      return res.status(400).json({ error: 'Invalid doctor ID or availability ID' });
+    }
+
+    // Verify doctor exists and matches the logged-in user
+    const doctor = await DoctorRepository.findByUserId(req.user.userId);
+    if (!doctor || doctor.doctor_id !== doctorIdNum) {
+      return res.status(403).json({ error: 'Access denied. You can only manage your own availability.' });
+    }
+
+    const { query } = require('../db/connection');
+    
+    // Check if slot is booked
+    const slotCheck = await query(
+      `SELECT status FROM doctor_availability 
+       WHERE availability_id = $1 AND doctor_id = $2`,
+      [availabilityIdNum, doctorIdNum]
+    );
+
+    if (slotCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Slot not found' });
+    }
+
+    if (slotCheck.rows[0].status === 'booked') {
+      return res.status(400).json({ error: 'Cannot delete a booked slot. Please cancel the appointment first.' });
+    }
+
+    // Delete the slot
+    const result = await query(
+      `DELETE FROM doctor_availability 
+       WHERE availability_id = $1 AND doctor_id = $2
+       RETURNING availability_id`,
+      [availabilityIdNum, doctorIdNum]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Slot not found or already deleted' });
+    }
+
+    res.json({
+      message: 'Slot deleted successfully',
+      availability_id: availabilityIdNum
+    });
+  } catch (error) {
+    console.error('Error deleting slot:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete slot' });
+  }
+});
+
+/**
+ * Get appointments for a specific patient (for providers creating medical records)
+ * GET /api/appointments/patient/:patientId
+ * Query params: upcomingOnly (default: false - show all appointments)
+ */
+router.get('/patient/:patientId', authenticate, async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const { upcomingOnly } = req.query;
+    
+    console.log(`[APPOINTMENTS] GET /patient/:patientId - patientId param: ${patientId}`);
+    
+    // Extract patient_id number from "patient_123" format
+    let patientIdNum = patientId;
+    if (typeof patientIdNum === 'string' && patientIdNum.startsWith('patient_')) {
+      patientIdNum = parseInt(patientIdNum.replace('patient_', ''));
+    } else {
+      patientIdNum = parseInt(patientIdNum);
+    }
+    
+    console.log(`[APPOINTMENTS] Extracted patient_id: ${patientIdNum}`);
+    
+    if (isNaN(patientIdNum)) {
+      return res.status(400).json({ error: 'Invalid patient ID' });
+    }
+    
+    // Show all appointments by default (not just upcoming) for medical records
+    const showUpcomingOnly = upcomingOnly === 'true';
+    
+    // For medical records, we want ALL appointments (including completed, cancelled, etc.)
+    // So we'll query directly instead of using findByPatientId which filters by status
+    const { query } = require('../db/connection');
+    
+    let queryStr = `
+      SELECT 
+        a.*,
+        d.doctor_id,
+        u.first_name || ' ' || u.last_name AS doctor_name,
+        u.email AS doctor_email,
+        s.speciality_name
+      FROM appointments a
+      JOIN doctors d ON a.doctor_id = d.doctor_id
+      JOIN users u ON d.user_id = u.user_id
+      LEFT JOIN speciality s ON a.speciality_id = s.speciality_id
+      WHERE a.patient_id = $1
+    `;
+    const params = [patientIdNum];
+    
+    // Filter out past appointments if upcomingOnly is true
+    if (showUpcomingOnly) {
+      queryStr += ` AND a.start_time >= NOW()`;
+    }
+    
+    queryStr += ` ORDER BY a.start_time DESC`; // Most recent first
+    
+    console.log(`[APPOINTMENTS] Query: ${queryStr}`);
+    console.log(`[APPOINTMENTS] Params: [${params.join(', ')}]`);
+    
+    const result = await query(queryStr, params);
+    const appointments = result.rows;
+    
+    console.log(`[APPOINTMENTS] Found ${appointments.length} appointments for patient_id ${patientIdNum}`);
+    if (appointments.length > 0) {
+      console.log(`[APPOINTMENTS] Sample appointment:`, {
+        appt_id: appointments[0].appt_id,
+        patient_id: appointments[0].patient_id,
+        status: appointments[0].status,
+        start_time: appointments[0].start_time
+      });
+    }
+    
+    // Format appointments for dropdown
+    const formattedAppointments = appointments.map(apt => {
+      const startTime = new Date(apt.start_time);
+      const dateStr = startTime.toISOString().split('T')[0]; // YYYY-MM-DD
+      const timeStr = startTime.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      });
+      const dateFormatted = startTime.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+      
+      return {
+        appt_id: apt.appt_id,
+        appointment_date: dateStr, // For form submission
+        start_time: apt.start_time,
+        end_time: apt.end_time,
+        doctor_name: apt.doctor_name || 'Unknown Doctor',
+        speciality_name: apt.speciality_name || '',
+        status: apt.status,
+        display_text: `${dateFormatted} at ${timeStr} - ${apt.doctor_name || 'Unknown Doctor'}${apt.speciality_name ? ` (${apt.speciality_name})` : ''}`
+      };
+    });
+    
+    res.json({
+      count: formattedAppointments.length,
+      appointments: formattedAppointments
+    });
+  } catch (error) {
+    console.error('[ERROR] Error fetching patient appointments:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch appointments' });
   }
 });
 
 /**
  * Get a single appointment by ID
  * GET /api/appointments/:apptId
- * NOTE: This must come after more specific routes like /available-slots/:doctorId
+ * NOTE: This must come after more specific routes like /available-slots/:doctorId and /availability/*
  */
 router.get('/:apptId', authenticate, async (req, res) => {
   try {
@@ -301,6 +625,42 @@ router.post('/', authenticate, requireRole('patient'), async (req, res) => {
       resourceId: appointment.appt_id,
       details: `Booked appointment with doctor ${doctor_id} on ${startTime.toISOString()}`
     });
+
+    // Send appointment confirmation email (don't block response if it fails)
+    try {
+      console.log('[APPOINTMENT_EMAIL] Starting email send process...');
+      console.log('[APPOINTMENT_EMAIL] Patient object:', {
+        patient_id: patient.patient_id,
+        user_id: patient.user_id,
+        email: patient.email,
+        first_name: patient.first_name,
+        last_name: patient.last_name
+      });
+      
+      // Get user email if not in patient object
+      if (!patient.email) {
+        console.log('[APPOINTMENT_EMAIL] Patient email not found, fetching from UserRepository...');
+        const user = await UserRepository.findById(patient.user_id);
+        if (user) {
+          patient.email = user.email;
+          console.log('[APPOINTMENT_EMAIL] Found user email:', user.email);
+        } else {
+          console.warn('[APPOINTMENT_EMAIL] User not found for user_id:', patient.user_id);
+        }
+      }
+      
+      console.log('[APPOINTMENT_EMAIL] Calling sendAppointmentConfirmationEmail...');
+      const emailResult = await sendAppointmentConfirmationEmail(appointment, patient, doctor);
+      console.log('[APPOINTMENT_EMAIL] Email send result:', emailResult);
+      
+      if (!emailResult.success) {
+        console.error('[APPOINTMENT_EMAIL] Email send failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('[ERROR] Failed to send appointment confirmation email:', emailError);
+      console.error('[ERROR] Email error stack:', emailError.stack);
+      // Don't fail the appointment booking if email fails
+    }
 
     res.status(201).json({
       message: 'Appointment booked successfully',

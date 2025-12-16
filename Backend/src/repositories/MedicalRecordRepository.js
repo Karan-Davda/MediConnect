@@ -96,7 +96,7 @@ function updatePatient(patientId, updateData) {
  * @param {Object} row - Database row
  * @returns {MedicalRecord} MedicalRecord instance
  */
-function mapRowToMedicalRecord(row) {
+async function mapRowToMedicalRecord(row) {
   // Parse JSONB columns - PostgreSQL returns JSONB as JavaScript objects/arrays
   // Note: Database uses singular column names (diagnosis, treatment, medications)
   let diagnoses = [];
@@ -183,13 +183,33 @@ function mapRowToMedicalRecord(row) {
       attachments = row.attachments;
     }
   }
-  // Include scan_path and scan_name in attachments if they exist
+  // Include scan_path and scan_name in attachments if they exist (legacy support)
   if (row.scan_path || row.scan_name) {
     attachments.push({
       name: row.scan_name || 'Scan',
       path: row.scan_path,
       type: 'scan'
     });
+  }
+  
+  // Generate signed URLs for S3 attachments when fetching records
+  // Note: This is done here so attachments always have signed URLs when returned
+  if (attachments.length > 0) {
+    const { getSignedUrlForFile } = require('../services/s3Service');
+    attachments = await Promise.all(
+      attachments.map(async (att) => {
+        if (att.s3_key || att.s3_url) {
+          try {
+            const key = att.s3_key || att.s3_url.replace(`s3://${process.env.AWS_S3_BUCKET_NAME || 'mediconnect-medical-files'}/`, '');
+            att.signed_url = await getSignedUrlForFile(key, 3600);
+          } catch (error) {
+            console.error(`Error generating signed URL for attachment ${att.id}:`, error);
+            att.signed_url = null;
+          }
+        }
+        return att;
+      })
+    );
   }
 
   let prescriptions = [];
@@ -351,7 +371,7 @@ async function createMedicalRecord(recordData) {
     [
       patientIdNum,
       doctorId,
-      recordData.visitDate || new Date(),
+      recordData.visitDate ? new Date(recordData.visitDate) : new Date(), // Use appointment date if provided
       recordData.visitType || 'routine',
       recordData.chiefComplaint || null,
       diagnoses,
@@ -368,7 +388,7 @@ async function createMedicalRecord(recordData) {
     ]
   );
 
-  return mapRowToMedicalRecord(result.rows[0]);
+  return await mapRowToMedicalRecord(result.rows[0]);
 }
 
 /**
@@ -392,7 +412,7 @@ async function findMedicalRecordById(recordId) {
     return null;
   }
 
-  return mapRowToMedicalRecord(result.rows[0]);
+  return await mapRowToMedicalRecord(result.rows[0]);
 }
 
 /**
@@ -422,7 +442,7 @@ async function findMedicalRecordsByPatientId(patientId, options = {}) {
   }
 
   const result = await query(queryStr, params);
-  return result.rows.map(row => mapRowToMedicalRecord(row));
+  return await Promise.all(result.rows.map(row => mapRowToMedicalRecord(row)));
 }
 
 /**
@@ -476,7 +496,7 @@ async function findAllMedicalRecords(filters = {}) {
   queryStr += ` ORDER BY visit_date DESC`;
 
   const result = await query(queryStr, params);
-  return result.rows.map(row => mapRowToMedicalRecord(row));
+  return await Promise.all(result.rows.map(row => mapRowToMedicalRecord(row)));
 }
 
 /**
@@ -630,7 +650,7 @@ async function updateMedicalRecord(recordId, updateData) {
     return null;
   }
 
-  return mapRowToMedicalRecord(result.rows[0]);
+  return await mapRowToMedicalRecord(result.rows[0]);
 }
 
 /**

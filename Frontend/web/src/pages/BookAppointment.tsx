@@ -545,11 +545,13 @@ const BookAppointment: React.FC = () => {
 
         auditLog("BOOK_APPOINTMENT", appointmentData);
 
-        setSuccessMsg("Appointment confirmed! Notification sent via SMS and email.");
-      }
+        setSuccessMsg("Appointment confirmed! A confirmation email has been sent to your email address.");
 
-      // DF-Out: dashboard/upcoming appointments would refresh after this
-      // navigate("/home");
+        // Refresh the page after 2 seconds to show updated appointment list
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      }
     } catch (err: any) {
       console.error("Appointment action failed:", err);
       setErrorMsg(

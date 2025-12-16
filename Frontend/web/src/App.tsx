@@ -21,6 +21,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Messages from "./pages/Message";
 import Claims from './pages/Claims'
 import MarketingCampaigns from './pages/MarketingCampaigns'
+import ManageAvailability from './pages/ManageAvailability'
 import './App.css'
 
 function App() {
@@ -43,6 +44,14 @@ function App() {
       />
       <Route 
         path="/home" 
+        element={
+          <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/dashboard" 
         element={
           <ProtectedRoute>
             <Home />
@@ -106,6 +115,14 @@ function App() {
         element={
           <ProtectedRoute requiredRole={['doctor', 'clinic_staff', 'clinic_admin']}>
             <Prescriptions />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/manage-availability" 
+        element={
+          <ProtectedRoute requiredRole={['doctor']}>
+            <ManageAvailability />
           </ProtectedRoute>
         } 
       />

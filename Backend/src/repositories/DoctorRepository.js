@@ -64,8 +64,9 @@ class DoctorRepository {
     const result = await query(
       `SELECT 
         d.*,
+        d.fees,
         u.first_name, u.last_name, u.email, u.phone_number,
-        u.country, u.state, u.city
+        u.country, u.state, u.city, u.clinic_id
       FROM doctors d
       JOIN users u ON d.user_id = u.user_id
       WHERE d.user_id = $1`,
@@ -83,8 +84,9 @@ class DoctorRepository {
     const result = await query(
       `SELECT 
         d.*,
+        d.fees,
         u.first_name, u.last_name, u.email, u.phone_number,
-        u.country, u.state, u.city
+        u.country, u.state, u.city, u.clinic_id
       FROM doctors d
       JOIN users u ON d.user_id = u.user_id
       WHERE d.doctor_id = $1`,
@@ -137,20 +139,31 @@ class DoctorRepository {
 
   /**
    * Get all doctors
+   * @param {number|null} clinicId - Optional clinic filter (for single-clinic mode)
    * @returns {Array} List of doctors
    */
-  static async getAll() {
-    const result = await query(
-      `SELECT 
+  static async getAll(clinicId = null) {
+    let queryStr = `
+      SELECT 
         d.*,
+        d.fees,
         u.first_name, u.last_name, u.email, u.phone_number,
-        u.country, u.state, u.city,
+        u.country, u.state, u.city, u.clinic_id,
         s.speciality_name
       FROM doctors d
       JOIN users u ON d.user_id = u.user_id
       LEFT JOIN speciality s ON d.speciality_id = s.speciality_id
-      ORDER BY u.last_name, u.first_name`
-    );
+    `;
+    
+    const params = [];
+    if (clinicId) {
+      queryStr += ` WHERE u.clinic_id = $1`;
+      params.push(clinicId);
+    }
+    
+    queryStr += ` ORDER BY u.last_name, u.first_name`;
+    
+    const result = await query(queryStr, params);
     return result.rows;
   }
 
