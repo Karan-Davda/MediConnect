@@ -78,6 +78,12 @@ const allNavItems = [
   },
 ];
 
+const marketingNavItems = [
+  { path: "/home", icon: "📊", label: "Dashboard" },
+  { path: "/marketing-campaigns", icon: "📢", label: "Marketing Campaigns" },
+  { path: "/account", icon: "👤", label: "Account" },
+];
+
 const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
   const { isAuthenticated, user, hasRole } = useAuth();
   const navigate = useNavigate();
@@ -85,6 +91,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
   const handleAccountClick = () => {
     navigate('/account');
   };
+
+  // Check if user is marketing admin
+  const forcedRole = localStorage.getItem("forcedRole");
+  const effectiveRole = forcedRole || user?.role;
+  const isMarketingAdmin = !!effectiveRole && (effectiveRole === "marketing_admin" || hasRole(["marketing_admin"]));
 
   // Filter menu items based on user role
   const getVisibleMenuItems = () => {
@@ -119,24 +130,42 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
       {/* Navigation */}
       <nav className="sidebar-nav">
         <ul className="nav-list">
-          {/* Regular menu items */}
-          {regularItems.map((item) => (
-            <li key={item.path} className="nav-item">
-              <NavLink
-                to={item.path}
-                end={item.path === "/home"}
-                className={({ isActive }) =>
-                  `nav-link ${isActive ? "active" : ""}`
-                }
-              >
-                <span className="nav-icon">{item.icon}</span>
-                <span className="nav-text">{item.label}</span>
-              </NavLink>
-            </li>
-          ))}
+          {isMarketingAdmin ? (
+            // Marketing admin gets limited navigation
+            marketingNavItems.map((item) => (
+              <li key={item.path} className="nav-item">
+                <NavLink
+                  to={item.path}
+                  end={item.path === "/home"} 
+                  className={({ isActive }) =>
+                    `nav-link ${isActive ? "active" : ""}`
+                  }
+                >
+                  <span className="nav-icon">{item.icon}</span>
+                  <span className="nav-text">{item.label}</span>
+                </NavLink>
+              </li>
+            ))
+          ) : (
+            <>
+              {/* Regular menu items */}
+              {regularItems.map((item) => (
+                <li key={item.path} className="nav-item">
+                  <NavLink
+                    to={item.path}
+                    end={item.path === "/home"}
+                    className={({ isActive }) =>
+                      `nav-link ${isActive ? "active" : ""}`
+                    }
+                  >
+                    <span className="nav-icon">{item.icon}</span>
+                    <span className="nav-text">{item.label}</span>
+                  </NavLink>
+                </li>
+              ))}
 
-          {/* Admin Section - Only show if there are admin items */}
-          {adminItems.length > 0 && (
+              {/* Admin Section - Only show if there are admin items */}
+              {adminItems.length > 0 && (
             <>
               <li className="nav-divider">
                 <span className="divider-text">Administration</span>
@@ -154,6 +183,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
                   </NavLink>
                 </li>
               ))}
+            </>
+          )}
             </>
           )}
         </ul>

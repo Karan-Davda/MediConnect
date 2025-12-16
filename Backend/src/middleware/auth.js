@@ -56,6 +56,15 @@ const users = [
     role: ROLES.CUSTOMER_SUCCESS,
     clinicId: null,
     isActive: true
+  },
+  {
+    id: '7',
+    email: 'marketing@example.com',
+    password: 'password123',
+    name: 'Maria Marketing Admin',
+    role: ROLES.MARKETING_ADMIN,
+    clinicId: null,
+    isActive: true
   }
 ];
 

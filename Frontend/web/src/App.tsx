@@ -18,6 +18,9 @@ import BillingReportsPage from "./pages/BillingReportsPage";
 import BillingAuditLogPage from "./pages/BillingAuditLogPage";
 import CompleteProfile from './pages/CompleteProfile'
 import ProtectedRoute from './components/ProtectedRoute'
+import Messages from "./pages/Message";
+import Claims from './pages/Claims'
+import MarketingCampaigns from './pages/MarketingCampaigns'
 import './App.css'
 
 function App() {
@@ -117,7 +120,6 @@ function App() {
         } 
       />
 
-      {/* Clinic Admin Routes */}
       <Route 
         path="/access-control" 
         element={
@@ -157,6 +159,32 @@ function App() {
         element={
           <ProtectedRoute requiredRole={['clinic_admin']}>
             <BillingAuditLogPage />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Additional Routes from Dev */}
+      <Route 
+        path="/messages" 
+        element={
+          <ProtectedRoute>
+            <Messages />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/claims" 
+        element={
+          <ProtectedRoute>
+            <Claims />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/marketing-campaigns" 
+        element={
+          <ProtectedRoute>
+            <MarketingCampaigns />
           </ProtectedRoute>
         } 
       />

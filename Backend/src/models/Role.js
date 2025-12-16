@@ -5,7 +5,8 @@ const ROLES = {
   CLINIC_STAFF: 'clinic_staff',
   CLINIC_ADMIN: 'clinic_admin',
   ACCOUNT_MANAGER: 'account_manager',
-  CUSTOMER_SUCCESS: 'customer_success'
+  CUSTOMER_SUCCESS: 'customer_success',
+  MARKETING_ADMIN: 'marketing_admin'
 };
 
 const ROLE_HIERARCHY = {
@@ -14,7 +15,8 @@ const ROLE_HIERARCHY = {
   [ROLES.CLINIC_STAFF]: 3,
   [ROLES.CLINIC_ADMIN]: 4,
   [ROLES.ACCOUNT_MANAGER]: 5,
-  [ROLES.CUSTOMER_SUCCESS]: 6
+  [ROLES.CUSTOMER_SUCCESS]: 6,
+  [ROLES.MARKETING_ADMIN]: 7
 };
 
 const PERMISSIONS = {
@@ -48,6 +50,12 @@ const PERMISSIONS = {
   MANAGE_CLINIC_ACCOUNTS: 'manage_clinic_accounts',
   VIEW_SYSTEM_ANALYTICS: 'view_system_analytics',
   MANAGE_SUBSCRIPTIONS: 'manage_subscriptions',
+  
+  // Marketing Admin Permissions
+  MANAGE_MARKETING_CAMPAIGNS: 'manage_marketing_campaigns',
+  VIEW_MARKETING_ANALYTICS: 'view_marketing_analytics',
+  MANAGE_MARKETING_CONTENT: 'manage_marketing_content',
+  VIEW_CUSTOMER_INSIGHTS: 'view_customer_insights',
   
   // Admin-specific permissions
   MANAGE_ROLES: 'manage_roles',
@@ -112,6 +120,12 @@ const ROLE_PERMISSIONS = {
     PERMISSIONS.VIEW_ALL_CLINICS,
     PERMISSIONS.MANAGE_CLINIC_ACCOUNTS,
     PERMISSIONS.VIEW_SYSTEM_ANALYTICS
+  ],
+  [ROLES.MARKETING_ADMIN]: [
+    PERMISSIONS.MANAGE_MARKETING_CAMPAIGNS,
+    PERMISSIONS.VIEW_MARKETING_ANALYTICS,
+    PERMISSIONS.MANAGE_MARKETING_CONTENT,
+    PERMISSIONS.VIEW_CUSTOMER_INSIGHTS
   ]
 };
 

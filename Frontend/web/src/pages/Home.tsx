@@ -41,6 +41,11 @@ const Home: React.FC = () => {
   const isAdmin = hasRole(['admin', 'clinic_admin']);
   const isDoctorOrStaff = hasRole(['doctor', 'clinic_staff']);
   const isProvider = isDoctorOrStaff; // only clinical providers, not admins
+  
+  // Check if user is marketing admin
+  const forcedRole = localStorage.getItem("forcedRole");
+  const effectiveRole = forcedRole || user?.role;
+  const isMarketingAdmin = !!effectiveRole && (effectiveRole === "marketing_admin" || hasRole(["marketing_admin"]));
 
   // Calendar functionality for providers (doctors/clinic_staff)
   const {
@@ -51,8 +56,29 @@ const Home: React.FC = () => {
     removeAvailability,
   } = useCalendar();
 
-  // Calendar days calculation for provider interface
+  // Calendar days calculation for marketing admin and providers
   const days = useMemo(() => {
+    if (isMarketingAdmin) {
+      // Simple calendar for marketing admin without provider functionality
+      const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+      const start = new Date(first);
+      start.setDate(first.getDate() - first.getDay());
+
+      return Array.from({ length: 42 }, (_, i) => {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        const k = iso(d);
+
+        return {
+          d,
+          iso: k,
+          open: [],
+          blocked: new Set(),
+          other: d.getMonth() !== cursor.getMonth(),
+        };
+      });
+    }
+
     if (!isProvider || !providers || providers.length === 0) return [];
 
     const providerId = providers[0]?.provider?.id ?? "p1";
@@ -81,7 +107,7 @@ const Home: React.FC = () => {
         other: d.getMonth() !== cursor.getMonth(),
       };
     });
-  }, [cursor, providers, getAvailability, isProvider]);
+  }, [cursor, providers, getAvailability, isProvider, isMarketingAdmin]);
 
   // Doctor / Provider Dashboard Content
   const renderDoctorDashboard = () => {
@@ -440,6 +466,151 @@ const Home: React.FC = () => {
     </div>
   );
 
+  // Marketing Admin Dashboard Content
+  const renderMarketingDashboard = () => (
+    <div className="dashboard-content">
+      {/* To Do Widget */}
+      <div className="widget todo-widget">
+        <div className="widget-header">
+          <span className="widget-icon">📝</span>
+          <h3 className="widget-title">To Do</h3>
+        </div>
+        <div className="widget-content">
+          <div className="todo-item" style={{ marginBottom: 8, padding: 8, border: "1px solid #e2e8f0", borderRadius: 4, backgroundColor: "#f7fafc" }}>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>Review Q1 campaign performance</div>
+            <div style={{ fontSize: 12, color: "#718096" }}>Due: Tomorrow</div>
+          </div>
+          <div className="todo-item" style={{ marginBottom: 8, padding: 8, border: "1px solid #e2e8f0", borderRadius: 4, backgroundColor: "#f7fafc" }}>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>Prepare flu shot campaign materials</div>
+            <div style={{ fontSize: 12, color: "#718096" }}>Due: End of week</div>
+          </div>
+          <div className="todo-item" style={{ marginBottom: 8, padding: 8, border: "1px solid #e2e8f0", borderRadius: 4, backgroundColor: "#f7fafc" }}>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>Schedule quarterly marketing meeting</div>
+            <div style={{ fontSize: 12, color: "#718096" }}>Due: Next week</div>
+          </div>
+          <div className="todo-item" style={{ padding: 8, border: "1px solid #e2e8f0", borderRadius: 4, backgroundColor: "#f7fafc" }}>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>Update patient communication templates</div>
+            <div style={{ fontSize: 12, color: "#718096" }}>Due: Dec 15</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Simple Calendar Widget */}
+      <div className="widget">
+        <div className="widget-header">
+          <span className="widget-icon">🗓️</span>
+          <h3 className="widget-title">Calendar</h3>
+        </div>
+        <div className="widget-content">
+          <div className="calendar-section">
+            <div className="calendar-header">
+              <span
+                className="calendar-nav"
+                onClick={() =>
+                  setCursor(
+                    new Date(
+                      cursor.getFullYear(),
+                      cursor.getMonth() - 1,
+                      1
+                    )
+                  )
+                }
+              >
+                ‹
+              </span>
+              <span className="calendar-month">{monthYear(cursor)}</span>
+              <span
+                className="calendar-nav"
+                onClick={() =>
+                  setCursor(
+                    new Date(
+                      cursor.getFullYear(),
+                      cursor.getMonth() + 1,
+                      1
+                    )
+                  )
+                }
+              >
+                ›
+              </span>
+            </div>
+
+            <div className="calendar-grid">
+              <div className="calendar-days">
+                <span>Su</span>
+                <span>Mo</span>
+                <span>Tu</span>
+                <span>We</span>
+                <span>Th</span>
+                <span>Fr</span>
+                <span>Sa</span>
+              </div>
+              <div className="calendar-dates">
+                {days.map(({ d, iso, other }) => {
+                  const todayISO = new Date().toISOString().slice(0, 10);
+                  const dateState =
+                    iso === todayISO
+                      ? "today"
+                      : new Date(iso) < new Date(todayISO)
+                      ? "past"
+                      : "future";
+
+                  const classNames = [
+                    other ? "other-month" : "",
+                    dateState,
+                  ]
+                    .join(" ")
+                    .trim();
+
+                  return (
+                    <span
+                      key={iso}
+                      className={classNames}
+                      onClick={() => setSelectedDate(iso)}
+                    >
+                      {d.getDate()}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12, padding: 8, backgroundColor: "#f7fafc", borderRadius: 4, fontSize: 12, color: "#718096" }}>
+            <strong>Selected Date:</strong> {new Date(selectedDate).toLocaleDateString()}
+            <br />
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Actions Widget */}
+      <div className="widget">
+        <div className="widget-header">
+          <span className="widget-icon">⚡</span>
+          <h3 className="widget-title">Quick Actions</h3>
+        </div>
+        <div className="widget-content" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button
+            className="admin-widget-btn"
+            onClick={() => navigate('/marketing-campaigns')}
+            style={{ width: "100%" }}
+          >
+            <span>📢</span>
+            <span>Manage Marketing Campaigns</span>
+          </button>
+          <button
+            className="admin-widget-btn"
+            onClick={() => navigate('/account')}
+            style={{ width: "100%" }}
+          >
+            <span>👤</span>
+            <span>Update Account Settings</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // Patient Dashboard Content
   const renderPatientDashboard = () => (
     <div className="dashboard-content">
@@ -555,6 +726,7 @@ const Home: React.FC = () => {
   const renderDashboard = () => {
     if (isAdmin) return renderAdminDashboard();
     if (isProvider) return renderDoctorDashboard();
+    if (isMarketingAdmin) return renderMarketingDashboard();
     return renderPatientDashboard();
   };
 
@@ -573,7 +745,7 @@ const Home: React.FC = () => {
           <div className="header-left">
             <h1 className="brand-title">
               MediConnect
-              {isAdmin ? ' – Admin' : isProvider ? ' – Provider' : ''}
+              {isAdmin ? ' – Admin' : isProvider ? ' – Provider' : isMarketingAdmin ? ' – Marketing' : ''}
             </h1>
           </div>
           <div className="header-center">
